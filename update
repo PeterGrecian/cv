@@ -1,0 +1,44 @@
+#!/bin/bash -ex
+# alternative to terraform apply (which will do the zip etc)
+# quicker and does pre-check compile
+
+# the favicon is made with base64 tick.png > cv/favicon.png64
+#env=${1:-dev}
+#export AWS_PROFILE=bmj-$env
+
+# a pattern is to update, test, git commit/push, update
+pushd cv
+if ! python -m py_compile *.py; then
+  echo "not updating"    
+  exit
+else
+  rm -rf __pycache__
+fi
+
+if ! python cv.py; then
+  echo "not updating"
+  exit
+fi
+
+git remote get-url origin > log.html
+git log -1 --oneline >>log.html
+date >> log.html
+sed ':a;N;$!ba;s/\n/<br>/g' log.html > contents.html
+cat contents.orig.html >> contents.html
+
+# create zip file
+if [ -e ../cv.zip ]; then
+  rm ../cv.zip
+fi
+
+#pushd terraform
+#terraform output -no-color > ../terraform_output.py
+#popd
+
+zip ../cv.zip *.py *.html *.png64 contents.html
+popd
+# update lambda function
+fn=cvdev
+#fn=cv-experimental
+aws lambda update-function-code --zip-file fileb://$PWD/cv.zip  --function-name $fn | grep CodeSize
+echo aws logs tail /aws/lambda/$fn --follow
