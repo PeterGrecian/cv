@@ -7,7 +7,7 @@
 #export AWS_PROFILE=bmj-$env
 
 # a pattern is to update, test, git commit/push, update
-pushd cv
+#pushd cv
 if ! python -m py_compile *.py; then
   echo "not updating"    
   exit
@@ -35,8 +35,8 @@ fi
 #terraform output -no-color > ../terraform_output.py
 #popd
 
-zip ../cv.zip *.py *.html *.png64 contents.html
-popd
+zip cv.zip *.py *.html *.png64 contents.html
+#popd
 # update lambda function
 fn=cvdev
 #fn=cv-experimental
