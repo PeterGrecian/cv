@@ -1,10 +1,7 @@
 #!/bin/bash -ex
-# alternative to terraform apply (which will do the zip etc)
-# quicker and does pre-check compile
+# publish assets to the lambda for public visibility
 
 # the favicon is made with base64 tick.png > favicon.png64
-#env=${1:-dev}
-#export AWS_PROFILE=bmj-$env
 
 # a pattern is to update, test, git commit/push, update
 #pushd cv
@@ -20,11 +17,12 @@ if ! python cv.py; then
   exit
 fi
 
-git remote get-url origin > log.html
-git log -1 --oneline >>log.html
-date >> log.html
-sed ':a;N;$!ba;s/\n/<br>/g' log.html > contents.html
-cat contents.orig.html >> contents.html
+# generate gitinfo so the git version is visible on site
+git remote get-url origin > gitinfo.html
+git log -1 --oneline >>gitinfo.html
+date >> gitinfo.html
+sed ':a;N;$!ba;s/\n/<br>/g' gitinfo.html > _gitinfo.html
+mv _gitinfo.html gitinfo.html
 
 # create zip file
 if [ -e ../cv.zip ]; then
