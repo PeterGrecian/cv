@@ -2,7 +2,7 @@
 # alternative to terraform apply (which will do the zip etc)
 # quicker and does pre-check compile
 
-# the favicon is made with base64 tick.png > cv/favicon.png64
+# the favicon is made with base64 tick.png > favicon.png64
 #env=${1:-dev}
 #export AWS_PROFILE=bmj-$env
 
