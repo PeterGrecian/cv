@@ -24,19 +24,18 @@ fi
 git remote get-url origin > gitinfo.html
 git log -1 --oneline >>gitinfo.html
 date >> gitinfo.html
+echo >> gitinfo.html
 sed ':a;N;$!ba;s/\n/<br>/g' gitinfo.html > _gitinfo.html
 mv _gitinfo.html gitinfo.html
 
 # create zip file
-if [ -e ../cv.zip ]; then
-  rm ../cv.zip
-fi
+
 
 #pushd terraform
 #terraform output -no-color > ../terraform_output.py
 #popd
-
-zip cv.zip *.py *.html *.png64 contents.html
+rm cv.zip >& /dev/null
+zip cv.zip *.py *.html *.png64 contents.html petergrecian.jpg gitinfo.html
 #popd
 # update lambda function
 fn=cvdev

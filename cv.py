@@ -1,4 +1,5 @@
 from pprint import pformat
+import os
 
 def lambda_handler(event, context):
     html = ""
@@ -18,11 +19,16 @@ def lambda_handler(event, context):
     print(f'X-Forwarded-For = {ip}')
 
     if path == f'/{stage}/event' or path == '/event':   # debugging info
+        html = open("gitinfo.html", "r").read()
         html += 'log_group = ' + context.log_group_name + '<br>'
         html += 'log_stream = ' + context.log_stream_name + '<br>' 
         html += 'path = ' + path + '<br>'
         html += 'stage = ' + stage + '<br>'
         html += 'root = ' + root + '<br>'
+        html += 'pwd = ' + os.getcwd() + '<br>'
+        for ff in os.listdir(os.getcwd()):
+            html += ff + ', '
+        html += '<br>'
         for key in event.keys():
             html += "_______________________" + key + "_________________________<br>"
             html += pformat(event[key]).replace(',', ',<br>')   + "<br><br>"            
