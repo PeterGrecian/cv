@@ -5,6 +5,9 @@
 
 # a pattern is to update, test, git commit/push, update
 #pushd cv
+
+# replace with GHA
+
 if ! python -m py_compile *.py; then
   echo "not updating"    
   exit
