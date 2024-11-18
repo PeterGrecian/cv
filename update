@@ -21,6 +21,8 @@ if ! python cv.py; then
   exit
 fi
 
+aws s3 cp petergrecian.jpg s3://www.petergrecian.co.uk
+
 # generate gitinfo so the git version is visible on site
 git remote get-url origin > gitinfo.html
 git log -1 --oneline >>gitinfo.html
