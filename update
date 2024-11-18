@@ -15,6 +15,7 @@ else
   rm -rf __pycache__
 fi
 
+touch gitinfo.html
 if ! python cv.py; then
   echo "not updating"
   exit
