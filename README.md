@@ -1,48 +1,24 @@
-Peter Grecian \- CURRICULUM VITAE  
- Location: Surbiton, Surrey.  
-peter.grecian at gmail.com
+# Peter Grecian - CV
+## code to publish my Curriculum Vitae 
+Lambda is used to publish web pages via API gateway.
 
-*Skills: Linux, terraform, python, puppet, AWS, OpenSearch, Github Actions.*
+The script "update" is used to zip and push the assets to AWS.  It provides git info on the website which can be used to confirm the state of the live code.  The pattern of use is:
+```
+./update
+test
+git commit ...
+./update
+```
+# Comparative Costs
+There are many ways of inexpensively publishing a short document such as a CV.  Using an EC2
+instance and a webserver, Apache for example, would cost $40 per year for the smallest, least expensive instance, a t4g.nano.  This would come down to $24 per year if payment was made one year advance.  Spot instances are a little cheaper at half the full price, however obviously, availability is not guaranteed.
 
-Working in the fields of AI research and film and TV CGI I have proposed, built and operated CPU/GPU clusters, including networking, air cooling, power distribution and software installation.  These cutting edge fields require the ability to exploit the latest hardware to provide novel applications using bulk computing, high speed networks and clustered storage.  
+Serverless methods for low volume demand is much cheaper since the cost is proportional to the number of impressions.  Lambda is $0.20 per million requests, and $0.16 per million 128MB, 100ms invocations.
 
-2018 \- 2024 **The BMJ**.   AWS Cloud Engineer/DevOps.  
-The British Medical Journal is one of the most prestigious publications in its field.  The BMJ publishes 60 journals in paper and digital form and a clinical decision support tool called "Best Practice" which is the product I have been most closely associated with,.   
+The 9 cents per GB *data to the internet* charge is unlikely to incur costs, unless the document goes viral.  My CV is about a third of 100k in size, mostly because it contains a mug shot.  The free 100GB per month is three million requests; about once every second.  Thereafter the charge would be $3 per million request, easily dominating the charge per request.  
 
-Initially the app was unreliable and would alert the operator on call most nights, via Pager Duty.  Sometimes that would be me.  I installed an ELK stack, and traced the issue to a mixture of EC2 instances having insufficient memory, Xmx being set incorrectly for the Java processes and in one case a Java library which had a memory leak.
+Cost Anomaly detection would be triggered if a the cost was greater than expected.  The account budget also would alert.  AWS WAF could be used.  This requires API Gateway, Cloudfront or and ALB ($220 per year).  A WAF Web ACL with a single rule is $72 per year and $0.60 per million requests.  API Gateway has throttling, which is typically set to 100 requests per second which is $900 per month.  I've set it to 1 request per second. 
 
-Having achieved stability I could then right size the EC2 instances and move to ARM architecture to save money and carbon emissions.  Current effort is to migrate to Kubernetes using EKS, Kustomise and github actions/ArgoCD for the many benefits that brings.
+Cloudfront has an "Always Free Tier", of 1TB data transfer to internet and 10 million requests which would be sufficient for this use case.
 
-Provisioning is with terraform, EC2 configuration with puppet.  I've written applications for the developers to start up dev and stage stacks "on demand", and to stop instances at weekends etc using lambda, python, flask and dynamoDB.   
-
-I am expert at OpenSearch Dashboards and have presented talks on how to use this powerful tool, and I maintain fluentbit/logstash ingestion into the OpenSearch domain I call "The Logstore".  I often help developers with queries and searches.
-
-I am the person at the BMJ people go to for AWS cost estimation and planning and have presented talks to my colleagues on this topic.
-
-I also use prometheus, Jenkins, AppDynamics, grafana.  Cloudwatch alerts.
-
-**Jan 2015 \- Mar 2018: Crystal Ski (TUI holidays).  Senior Cloud Engineer/DevOps**  
-Responsible for providing AWS hosting of a website which sold 100s of millions of pounds of skiing holidays each season.  Puppet, terraform, Jenkins.
-
-**Feb 2014 \- Jan 2015:  Method Studios, 8-14 Meard St, London.  Senior Systems Engineer** for a Hollywood special effects company.  High speed bulk data handling using Isilon storage, DST tape and 10GE switches.
-
-**June 2012 \- Feb 2014: Google DeepMind.  40 Bernard St, London. Senior Linux Systems Administrator** for a rapidly expanding startup company purchased whilst I was there by Google.  Design, purchase and installation of a high power Linux compute cluster with Grid Engine job scheduling for neural network training.  I was expert on the HP/Supermicro Intel product lines and how to get the most compute power in the smallest space.  Working with researchers of international renown.
-
-**Jan 2008 \- June 2012 Freelance hardware engineer and systems administrator.**     
-Designing building and selling an all in one storage and network solution for mid size boutique visual effects companies in and around Soho, using 10GigE and RAID controllers.
-
-**Aug 1994-Jan 2008,  Senior Systems and programming lead, MPC, 127 Wardour St, London**.  Providing bespoke hardware and C++ software solutions for TV advertising and broadcast and film clients.  Developed real time hardware rendered particle systems for National Lottery commercials and Harry Potter Films.  Working with film directors and advertising agencies.
-
-Prior to working in TV and film I worked at Philips Research on Gallium Arsenide transistors for 6 years, publishing papers in journals and presenting a paper at a symposium.
-
-**Links**  
-[https://www.imdb.com/name/nm0337418](https://www.imdb.com/name/nm0337418)  
-[https://www.linkedin.com/in/peter-grecian-1700a317](https://www.linkedin.com/in/peter-grecian-1700a317)  
-[https://w3.petergrecian.co.uk/contents](https://w3.petergrecian.co.uk/contents)  
-[https://github.com/PeterGrecian](https://github.com/PeterGrecian)  
-[http://adsabs.harvard.edu/abs/1989ElL....25..871B](http://adsabs.harvard.edu/abs/1989ElL....25..871B) GaAs camel-cathode Gunn devices
-
-   
-**Education**:  
-MSc IT and Computer Graphics, Middlesex University  
-BSc (Hons) Physics (3rd), Oxford University, St Catherine's College.  Excelled at the practical experimental course.
+Route53 costs $6 per hosted zone per year, $0.40 per million queries.  The top level domain I use, .co.uk, is $9 per year.  Most are much more expensive, only .me.uk ($8) and .link ($5) are cheaper.  
