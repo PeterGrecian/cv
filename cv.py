@@ -4,7 +4,8 @@ import os
 def lambda_handler(event, context):
     html = ""
     favicon=open("favicon.png64", "r").read()
-    fav = f'<title>Peter Grecian</title><link rel="icon" type="image/png" href="data:image/png;base64,{favicon}">'
+    fav = f'<link rel="icon" type="image/png" href="data:image/png;base64,{favicon}">'
+    #fav += '\n<head><link rel="stylesheet" href="styles.css"></head>'
     path = event['path']
     stage = event['requestContext']['stage']
     host = event['headers']['Host']
@@ -19,7 +20,6 @@ def lambda_handler(event, context):
     print(f'X-Forwarded-For = {ip}')
 
     if path == f'/{stage}/event' or path == '/event':   # debugging info
-        html = open("gitinfo.html", "r").read()
         html += 'log_group = ' + context.log_group_name + '<br>'
         html += 'log_stream = ' + context.log_stream_name + '<br>' 
         html += 'path = ' + path + '<br>'
@@ -31,12 +31,14 @@ def lambda_handler(event, context):
         html += '<br>'
         for key in event.keys():
             html += "_______________________" + key + "_________________________<br>"
-            html += pformat(event[key]).replace(',', ',<br>')   + "<br><br>"            
+            html += pformat(event[key]).replace(',', ',<br>') + "<br><br>"
+    elif path == f'/{stage}/gitinfo' or path == '/gitinfo':
+        html = open("gitinfo.html", "r").read()
     elif path == f'/{stage}/contents' or path == '/contents':
         html += open('contents.html', 'r').read()
     else:
         html += open('cv.html', 'r').read()
-    content = f'<html><head>{fav}</head><body>{html}</body></html>'
+    content = f'<html><head>{fav}{html}</body></html>'
 
     return {
         'statusCode': 200,

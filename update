@@ -1,7 +1,8 @@
 #!/bin/bash -ex
 # publish assets to the lambda for public visibility
 
-# the favicon is made with base64 tick.png > favicon.png64
+# the favicon is made with 
+base64 tick.png > favicon.png64
 
 # a pattern is to update, test, git commit/push, update
 #pushd cv
@@ -21,27 +22,36 @@ if ! python cv.py; then
   exit
 fi
 
-aws s3 cp petergrecian.jpg s3://www.petergrecian.co.uk
+# update the s3 site
+bucket=www.petergrecian.co.uk
+aws s3 cp petergrecian.jpg s3://$bucket
+aws s3 cp cv.html s3://$bucket/index.html
 
 # generate gitinfo so the git version is visible on site
-git remote get-url origin > gitinfo.html
-git log -1 --oneline >>gitinfo.html
-date >> gitinfo.html
-echo >> gitinfo.html
-sed ':a;N;$!ba;s/\n/<br>/g' gitinfo.html > _gitinfo.html
-mv _gitinfo.html gitinfo.html
-
-# create zip file
-
+echo '<link rel="stylesheet" href="styles.css">' > gitinfo.html
+echo '<title>Peter Grecian - Git Info</title>' >> gitinfo.html
+origin=$(git remote get-url origin)
+log=$(git log -1 --oneline)
+date=$(date)
+echo "$origin<br>$log<br>$date<br>" >> gitinfo.html
+commit=$(echo $log| cut -d ' ' -f 1)
+echo '<a href="https://github.com/PeterGrecian/cv/commit/'$commit'">https://github.com/PeterGrecian/cv/commit/'$commit'</a>' >> gitinfo.html
+echo '</body></html>' >> gitinfo.html
 
 #pushd terraform
 #terraform output -no-color > ../terraform_output.py
 #popd
-rm cv.zip >& /dev/null
+
 zip cv.zip *.py *.html *.png64 contents.html petergrecian.jpg gitinfo.html
-#popd
+
 # update lambda function
 fn=cvdev
 #fn=cv-experimental
-aws lambda update-function-code --zip-file fileb://$PWD/cv.zip  --function-name $fn | grep CodeSize
+aws lambda update-function-code --zip-file fileb://$PWD/cv.zip \
+  --function-name $fn | grep CodeSize
 echo aws logs tail /aws/lambda/$fn --follow
+
+# cleanup
+#rm gitinfo.html
+rm cv.zip
+rm favicon.png64
