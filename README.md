@@ -9,6 +9,7 @@ test
 git commit ...
 ./update
 ```
+It would be preferable to use github actions, however this is very slow in comparison.
 # Comparative Costs
 There are many ways of inexpensively publishing a short document such as a CV.  Using an EC2
 instance and a webserver, Apache for example, would cost $40 per year for the smallest, least expensive instance, a t4g.nano.  This would come down to $24 per year if payment was made one year advance.  Spot instances are a little cheaper at half the full price, however obviously, availability is not guaranteed.
@@ -24,3 +25,4 @@ Cloudfront has an "Always Free Tier", of 1TB data transfer to internet and 10 mi
 Route53 costs $6 per hosted zone per year, $0.40 per million queries.  The top level domain I use, .co.uk, is $9 per year.  Most are much more expensive, only .me.uk ($8) and .link ($5) are cheaper.  
 
 ## Always Free Tier
+400000 Lambda-GB-Second
