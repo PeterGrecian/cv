@@ -1,6 +1,6 @@
 # Peter Grecian - CV
 ## code to publish my Curriculum Vitae 
-Lambda is used to publish web pages via API gateway.
+Lambda is used to publish web pages via API gateway.  If the website gets more complicated I'll use Flask.
 
 The script "update" is used to zip and push the assets to AWS.  It provides git info on the website which can be used to confirm the state of the live code.  The pattern of use is:
 ```
