@@ -25,4 +25,4 @@ Cloudfront has an "Always Free Tier", of 1TB data transfer to internet and 10 mi
 Route53 costs $6 per hosted zone per year, $0.40 per million queries.  The top level domain I use, .co.uk, is $9 per year.  Most are much more expensive, only .me.uk ($8) and .link ($5) are cheaper.  
 
 ## Always Free Tier
-400000 Lambda-GB-Second
+Relevant design information would be the amount of the 400000 Lambda-GB-Second and 1 million requests per month of the always free tier allowance already used, the rate at which it is being used and the expected day of the month on which it will be exhausted.  After that there is a stepped discount and an estimate of the effective price including any savings plan discount can be used.
