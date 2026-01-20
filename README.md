@@ -1,6 +1,13 @@
 # Peter Grecian - CV
-## code to publish my Curriculum Vitae 
+## code to publish my Curriculum Vitae and Garden Camera
 Lambda is used to publish web pages via API gateway.  If the website gets more complicated I'll use Flask.
+
+### Routes
+- `/` - CV (default)
+- `/contents` - Site contents/index
+- `/event` - Debug info showing Lambda event and context
+- `/gitinfo` - Git commit information for deployed code
+- `/gardencam` - Password-protected garden camera (displays latest 3 images)
 
 The script "update" is used to zip and push the assets to AWS.  It provides git info on the website which can be used to confirm the state of the live code.  The pattern of use is:
 ```
@@ -26,3 +33,30 @@ Route53 costs $6 per hosted zone per year, $0.40 per million queries.  The top l
 
 ## Always Free Tier
 Relevant design information would be the amount of the 400000 Lambda-GB-Second and 1 million requests per month of the always free tier allowance already used, the rate at which it is being used and the expected day of the month on which it will be exhausted.  After that there is a stepped discount and an estimate of the effective price including any savings plan discount can be used.
+
+## Garden Camera Feature
+
+### Overview
+The `/gardencam` route displays the latest 3 images captured by a Raspberry Pi camera module, updated every 10 minutes.
+
+### Architecture
+- **Raspberry Pi**: Captures images with low-light settings (gain 16, 1-second exposure), applies auto-contrast, uploads to S3
+- **S3 Bucket**: `gardencam-berrylands-eu-west-1` (eu-west-1) stores all images
+- **Lambda**: Retrieves latest 3 images, generates presigned URLs (1-hour expiration)
+- **Authentication**: HTTP Basic Auth with password stored in AWS Secrets Manager
+
+### Security
+- Password protected via HTTP Basic Authentication
+- Password stored in AWS Secrets Manager: `gardencam/password` (eu-west-1)
+- IAM policy grants Lambda role access to:
+  - S3 bucket: `gardencam-berrylands-eu-west-1` (ListBucket, GetObject)
+  - Secrets Manager: `gardencam/password` in eu-west-1 and eu-west-2
+
+### Image Display
+- Uses S3 presigned URLs instead of base64 encoding (avoids Lambda response size limits)
+- Displays 3 images side-by-side with labels: "Latest", "Previous", "Earlier"
+- Responsive layout: 1024px max-width on desktop, stacks vertically on mobile
+- Dark theme optimized for low-light images
+
+### Related Repository
+See `~/Berrylands/gardencam/` for the Raspberry Pi capture script and setup instructions.
