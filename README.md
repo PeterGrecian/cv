@@ -4,10 +4,13 @@ Lambda is used to publish web pages via API gateway.  If the website gets more c
 
 ### Routes
 - `/` - CV (default)
-- `/contents` - Site contents/index
+- `/contents` - Site contents/index (redesigned with pastel ellipse buttons)
 - `/event` - Debug info showing Lambda event and context
 - `/gitinfo` - Git commit information for deployed code
 - `/gardencam` - Password-protected garden camera (displays latest 3 images)
+- `/gardencam/gallery` - Gallery view with thumbnails organized by 4-hour periods
+- `/gardencam/display?key=<image_key>` - Display-width view of specific image
+- `/gardencam/fullres?key=<image_key>` - Full resolution view of specific image
 
 The script "update" is used to zip and push the assets to AWS.  It provides git info on the website which can be used to confirm the state of the live code.  The pattern of use is:
 ```
@@ -54,9 +57,22 @@ The `/gardencam` route displays the latest 3 images captured by a Raspberry Pi c
 
 ### Image Display
 - Uses S3 presigned URLs instead of base64 encoding (avoids Lambda response size limits)
-- Displays 3 images side-by-side with labels: "Latest", "Previous", "Earlier"
+- Main page displays 3 images side-by-side with labels: "Latest", "Previous", "Earlier"
+- Images are clickable and link to display-width views
 - Responsive layout: 1024px max-width on desktop, stacks vertically on mobile
 - Dark theme optimized for low-light images
+
+### Gallery Features
+- **Main View** (`/gardencam`): Shows latest 3 images with "View Full Gallery" link
+- **Gallery View** (`/gardencam/gallery`): All images organized by 4-hour time periods
+  - Images grouped into periods: 0-3, 4-7, 8-11, 12-15, 16-19, 20-23 hours
+  - Grid layout with thumbnails (200px on desktop, 150px on mobile)
+  - Each thumbnail links to display-width view
+- **Display-Width View** (`/gardencam/display`): Optimized for screen viewing (max 1920px)
+  - Clickable image links to full resolution
+  - Navigation: Back to Latest | View Gallery | View Full Resolution
+- **Full Resolution View** (`/gardencam/fullres`): Original image at full resolution
+  - Navigation: Back to Latest | View Gallery
 
 ### Related Repository
 See `~/Berrylands/gardencam/` for the Raspberry Pi capture script and setup instructions.

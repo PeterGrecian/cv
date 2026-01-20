@@ -2,6 +2,7 @@ from pprint import pformat
 import os
 import base64
 from io import BytesIO
+from datetime import datetime
 
 try:
     import boto3
@@ -14,6 +15,7 @@ GARDENCAM_BUCKET = "gardencam-berrylands-eu-west-1"
 GARDENCAM_REGION = "eu-west-1"
 GARDENCAM_SECRET_NAME = "gardencam/password"
 GARDENCAM_PASSWORD = None
+DYNAMODB_TABLE = "cv-access-logs"
 
 
 def get_secret(secret_name):
@@ -65,42 +67,140 @@ def check_basic_auth(event, required_password):
         return False
 
 
-def get_latest_gardencam_images(count=3):
-    """Get presigned URLs for the latest N images from S3."""
+def log_connection(event, context):
+    """Log connection details to DynamoDB."""
+    if not BOTO3_AVAILABLE:
+        return
+
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+        table = dynamodb.Table(DYNAMODB_TABLE)
+
+        headers = event.get('headers', {})
+        timestamp = datetime.utcnow().isoformat()
+
+        # Get user agent (check both cases due to API Gateway)
+        user_agent = headers.get('User-Agent') or headers.get('user-agent', 'Unknown')
+
+        item = {
+            'timestamp': timestamp,
+            'request_id': context.request_id,
+            'path': event.get('path', ''),
+            'ip': headers.get('X-Forwarded-For', 'Unknown'),
+            'user_agent': user_agent,
+            'referer': headers.get('referer') or headers.get('Referer', ''),
+            'stage': event.get('requestContext', {}).get('stage', ''),
+            'host': headers.get('Host', '')
+        }
+
+        table.put_item(Item=item)
+    except Exception as e:
+        print(f"Failed to log connection: {str(e)}")
+
+
+def parse_timestamp_from_key(key):
+    """Extract timestamp from filename: garden_YYYYMMDD_HHMMSS.jpg"""
+    try:
+        filename_parts = key.replace('.jpg', '').split('_')
+        if len(filename_parts) >= 3:
+            date_str = filename_parts[1]
+            time_str = filename_parts[2]
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} {time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+    except:
+        pass
+    return None
+
+
+def get_presigned_url(key, expires_in=3600):
+    """Generate presigned URL for a specific S3 key."""
+    if not BOTO3_AVAILABLE:
+        return None
+    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+    return s3.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': GARDENCAM_BUCKET, 'Key': key},
+        ExpiresIn=expires_in
+    )
+
+
+def get_all_gardencam_images():
+    """Get all gardencam images from S3."""
     if not BOTO3_AVAILABLE:
         return []
     s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
 
-    # List objects and find the most recent
+    # List all objects
     response = s3.list_objects_v2(Bucket=GARDENCAM_BUCKET)
     if "Contents" not in response:
         return []
 
-    # Sort by LastModified, get newest N
-    objects = sorted(response["Contents"], key=lambda x: x["LastModified"], reverse=True)
+    # Sort by Key (filename contains timestamp), newest first
+    objects = sorted(response["Contents"], key=lambda x: x["Key"], reverse=True)
     images = []
 
-    for obj in objects[:count]:
+    for obj in objects:
         key = obj["Key"]
-        timestamp = obj["LastModified"].strftime("%Y-%m-%d %H:%M:%S")
-
-        # Generate presigned URL (expires in 1 hour)
-        url = s3.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': GARDENCAM_BUCKET, 'Key': key},
-            ExpiresIn=3600
-        )
+        timestamp = parse_timestamp_from_key(key) or obj["LastModified"].strftime("%Y-%m-%d %H:%M:%S")
 
         images.append({
-            'url': url,
+            'key': key,
             'timestamp': timestamp,
-            'key': key
+            'last_modified': obj["LastModified"]
         })
 
     return images
 
 
+def get_latest_gardencam_images(count=3):
+    """Get presigned URLs for the latest N images from S3."""
+    if not BOTO3_AVAILABLE:
+        return []
+
+    all_images = get_all_gardencam_images()
+    images = []
+
+    for img in all_images[:count]:
+        url = get_presigned_url(img['key'])
+        images.append({
+            'url': url,
+            'timestamp': img['timestamp'],
+            'key': img['key']
+        })
+
+    return images
+
+
+def group_images_by_4hour_periods(images):
+    """Group images into 4-hour time periods."""
+    from collections import defaultdict
+
+    periods = defaultdict(list)
+
+    for img in images:
+        # Parse the timestamp to get the hour
+        try:
+            ts = img['timestamp']
+            # Format: YYYY-MM-DD HH:MM:SS
+            date_part = ts.split()[0]
+            hour = int(ts.split()[1].split(':')[0])
+
+            # Calculate 4-hour period (0-3, 4-7, 8-11, 12-15, 16-19, 20-23)
+            period_start = (hour // 4) * 4
+            period_key = f"{date_part} {period_start:02d}:00-{(period_start+3):02d}:59"
+
+            periods[period_key].append(img)
+        except:
+            periods['Unknown'].append(img)
+
+    # Sort periods in reverse chronological order
+    sorted_periods = sorted(periods.items(), reverse=True)
+    return sorted_periods
+
+
 def lambda_handler(event, context):
+    # Log connection details to DynamoDB
+    log_connection(event, context)
+
     html = ""
     favicon=open("favicon.png64", "r").read()
     fav = f'<link rel="icon" type="image/png" href="data:image/png;base64,{favicon}">'
@@ -135,6 +235,148 @@ def lambda_handler(event, context):
         html = open("gitinfo.html", "r").read()
     elif path == f'/{stage}/contents' or path == '/contents':
         html += open('contents.html', 'r').read()
+    elif path.startswith(f'/{stage}/gardencam/fullres') or path.startswith('/gardencam/fullres'):
+        # Full resolution image view
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        # Get image key from query string
+        query_params = event.get('queryStringParameters', {}) or {}
+        image_key = query_params.get('key', '')
+
+        if image_key:
+            timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
+            image_url = get_presigned_url(image_key)
+
+            html += f'''
+            <title>Full Resolution - {timestamp}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+                .nav {{ margin-bottom: 1rem; }}
+                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
+                .nav a:hover {{ text-decoration: underline; }}
+                h2 {{ margin-bottom: 1rem; color: #aaa; }}
+                img {{ max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
+            </style>
+            <div class="nav">
+                <a href="../gardencam">← Back to Latest</a> | <a href="gallery">View Gallery</a>
+            </div>
+            <h2>{timestamp} UTC</h2>
+            <img src="{image_url}" alt="Full resolution image">
+            '''
+        else:
+            html += '<h1>Error: No image specified</h1>'
+    elif path.startswith(f'/{stage}/gardencam/display') or path.startswith('/gardencam/display'):
+        # Display-width image view
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        # Get image key from query string
+        query_params = event.get('queryStringParameters', {}) or {}
+        image_key = query_params.get('key', '')
+
+        if image_key:
+            timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
+            image_url = get_presigned_url(image_key)
+
+            html += f'''
+            <title>Display Width - {timestamp}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+                .nav {{ margin-bottom: 1rem; }}
+                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
+                .nav a:hover {{ text-decoration: underline; }}
+                h2 {{ margin-bottom: 1rem; color: #aaa; }}
+                .image-container {{ max-width: 1920px; margin: 0 auto; }}
+                img {{ width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
+            </style>
+            <div class="nav">
+                <a href="../gardencam">← Back to Latest</a> | <a href="gallery">View Gallery</a> | <a href="fullres?key={image_key}">View Full Resolution</a>
+            </div>
+            <h2>{timestamp} UTC</h2>
+            <div class="image-container">
+                <a href="fullres?key={image_key}">
+                    <img src="{image_url}" alt="Display width image">
+                </a>
+            </div>
+            '''
+        else:
+            html += '<h1>Error: No image specified</h1>'
+    elif path.startswith(f'/{stage}/gardencam/gallery') or path.startswith('/gardencam/gallery'):
+        # Gallery page with thumbnails organized by 4-hour periods
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        all_images = get_all_gardencam_images()
+        periods = group_images_by_4hour_periods(all_images)
+
+        html += '''
+        <title>Garden Camera Gallery</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
+            .nav { text-align: center; margin-bottom: 1rem; }
+            .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; }
+            .nav a:hover { text-decoration: underline; }
+            h1 { text-align: center; margin-bottom: 2rem; }
+            .period { margin-bottom: 3rem; }
+            .period-header { font-size: 1.3rem; color: #aaa; margin-bottom: 1rem; padding: 0.5rem; background: #2a2a2a; border-radius: 6px; }
+            .thumbnails { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+            .thumb-container { position: relative; }
+            .thumb-container a { display: block; }
+            .thumb-container img { width: 100%; height: 150px; object-fit: cover; border-radius: 6px; transition: transform 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+            .thumb-container img:hover { transform: scale(1.05); }
+            .thumb-time { text-align: center; font-size: 0.85rem; color: #888; margin-top: 0.3rem; }
+
+            @media (max-width: 768px) {
+                .thumbnails { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
+                .thumb-container img { height: 120px; }
+            }
+        </style>
+        <div class="nav">
+            <a href="../gardencam">← Back to Latest</a>
+        </div>
+        <h1>Garden Camera Gallery</h1>
+        '''
+
+        for period_name, period_images in periods:
+            html += f'<div class="period"><div class="period-header">{period_name} UTC</div><div class="thumbnails">'
+
+            for img in period_images:
+                thumb_url = get_presigned_url(img['key'])
+                time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
+
+                html += f'''
+                <div class="thumb-container">
+                    <a href="display?key={img['key']}">
+                        <img src="{thumb_url}" alt="{img['timestamp']}">
+                    </a>
+                    <div class="thumb-time">{time_only}</div>
+                </div>
+                '''
+
+            html += '</div></div>'
+
     elif path == f'/{stage}/gardencam' or path == '/gardencam':
         # Check authentication
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -153,17 +395,37 @@ def lambda_handler(event, context):
             <title>Garden Camera</title>
             <style>
                 body { font-family: Arial, sans-serif; text-align: center; margin: 1rem; background: #1a1a1a; color: #fff; }
-                h1 { margin-bottom: 1.5rem; }
+                h1 { margin-bottom: 1rem; font-size: 2rem; }
+                .gallery-link { display: inline-block; margin-bottom: 1.5rem; padding: 0.5rem 1.5rem; background: #4a5568; color: #fff; text-decoration: none; border-radius: 6px; transition: background 0.3s; }
+                .gallery-link:hover { background: #5a6578; }
                 .gallery { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; max-width: 1024px; margin: 0 auto; }
                 .image-container { flex: 1; min-width: 280px; max-width: 340px; }
-                .image-container img { width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+                .image-container a { display: block; cursor: pointer; }
+                .image-container img { width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: transform 0.3s; }
+                .image-container img:hover { transform: scale(1.05); }
                 .timestamp { color: #888; margin-top: 0.5rem; font-size: 0.9rem; }
-                .label { color: #aaa; font-weight: bold; margin-bottom: 0.5rem; }
+                .label { color: #aaa; font-weight: bold; margin-bottom: 0.5rem; font-size: 1rem; }
+
+                /* Tablet layout */
+                @media (max-width: 1024px) {
+                    h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+                    .gallery { gap: 0.75rem; }
+                    .image-container { min-width: 200px; max-width: 45%; }
+                    .image-container:nth-child(3) { flex-basis: 100%; max-width: 90%; }
+                }
+
+                /* Mobile layout - stack vertically */
                 @media (max-width: 768px) {
-                    .image-container { max-width: 100%; }
+                    body { margin: 0.5rem; }
+                    h1 { font-size: 1.25rem; margin-bottom: 0.75rem; }
+                    .gallery { flex-direction: column; gap: 1.5rem; }
+                    .image-container { min-width: 100%; max-width: 100%; }
+                    .label { font-size: 1.1rem; }
+                    .timestamp { font-size: 0.85rem; }
                 }
             </style>
             <h1>Garden Camera</h1>
+            <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
             <div class="gallery">
             '''
             labels = ['Latest', 'Previous', 'Earlier']
@@ -172,7 +434,9 @@ def lambda_handler(event, context):
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
-                    <img src="{img['url']}" alt="{label} capture">
+                    <a href="gardencam/display?key={img['key']}">
+                        <img src="{img['url']}" alt="{label} capture">
+                    </a>
                     <p class="timestamp">{img['timestamp']} UTC</p>
                 </div>
                 '''
