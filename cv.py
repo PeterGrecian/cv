@@ -160,9 +160,16 @@ def get_latest_gardencam_images(count=3):
     images = []
 
     for img in all_images[:count]:
-        url = get_presigned_url(img['key'])
+        # Use thumbnail for faster page load
+        thumb_key = f"thumb_{img['key']}"
+        thumb_url = get_presigned_url(thumb_key)
+
+        # Full-res URL for click-through
+        full_url = get_presigned_url(img['key'])
+
         images.append({
-            'url': url,
+            'url': thumb_url,
+            'full_url': full_url,
             'timestamp': img['timestamp'],
             'key': img['key']
         })
