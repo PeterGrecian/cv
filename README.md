@@ -7,7 +7,8 @@ Lambda is used to publish web pages via API gateway.  If the website gets more c
 - `/contents` - Site contents/index (redesigned with pastel ellipse buttons)
 - `/event` - Debug info showing Lambda event and context
 - `/gitinfo` - Git commit information for deployed code
-- `/gardencam` - Password-protected garden camera (displays latest 3 images)
+- `/gardencam` - Password-protected garden camera (displays latest 3 images, capture button)
+- `/gardencam/capture` - API endpoint to trigger remote capture (POST)
 - `/gardencam/gallery` - Gallery index listing all 4-hour periods
 - `/gardencam/gallery?period=<period>` - Gallery view for specific 4-hour period
 - `/gardencam/display?key=<image_key>` - Display-width view of specific image
@@ -103,6 +104,27 @@ The camera script now features intelligent day/night detection:
 - Camera parameters configured via YAML file (`config.yaml`)
 - Adjustable thresholds, exposure times, gain settings
 - Enable/disable features (autocontrast, stats collection, DynamoDB storage)
+
+### Remote Capture
+
+The Garden Camera page includes a "📷 Capture Now" button that triggers an immediate capture from the Raspberry Pi.
+
+**How it works**:
+1. User clicks "Capture Now" button on `/gardencam` page
+2. Button sends POST request to `/gardencam/capture` endpoint
+3. Lambda writes command to `gardencam-commands` DynamoDB table (status: pending)
+4. Raspberry Pi checks DynamoDB every minute via `check_commands.py` cron job
+5. Pi executes capture, uploads to S3, stores stats in DynamoDB
+6. Pi updates command status to "completed"
+7. New image appears in gallery within ~60 seconds (next page reload)
+
+**Setup on Raspberry Pi**:
+```bash
+cd ~/Berrylands/gardencam
+./setup_command_check.bash
+```
+
+This adds a cron job that runs every minute to check for capture commands.
 
 ### Related Repository
 See `~/Berrylands/gardencam/` for the Raspberry Pi capture script and setup instructions.
