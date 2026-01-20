@@ -98,6 +98,43 @@ def log_connection(event, context):
         print(f"Failed to log connection: {str(e)}")
 
 
+def log_execution_metrics(context, duration_ms, path=''):
+    """Log Lambda execution metrics to DynamoDB."""
+    if not BOTO3_AVAILABLE:
+        return
+
+    try:
+        from decimal import Decimal
+        dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+        table = dynamodb.Table('lambda-execution-logs')
+
+        timestamp = datetime.utcnow().isoformat()
+        function_name = context.function_name
+
+        # Calculate estimated cost (pricing as of 2024)
+        # Memory: $0.0000166667 per GB-second
+        # Requests: $0.20 per 1M requests
+        memory_gb = Decimal(str(context.memory_limit_in_mb)) / Decimal('1024')
+        duration_seconds = Decimal(str(duration_ms)) / Decimal('1000')
+        memory_cost = memory_gb * duration_seconds * Decimal('0.0000166667')
+        request_cost = Decimal('0.0000002')  # $0.20 per 1M requests
+        total_cost = memory_cost + request_cost
+
+        item = {
+            'function_name': function_name,
+            'timestamp': timestamp,
+            'request_id': context.request_id,
+            'duration_ms': Decimal(str(duration_ms)),
+            'memory_limit_mb': Decimal(str(context.memory_limit_in_mb)),
+            'path': path,
+            'estimated_cost_usd': total_cost
+        }
+
+        table.put_item(Item=item)
+    except Exception as e:
+        print(f"Failed to log execution metrics: {str(e)}")
+
+
 def parse_timestamp_from_key(key):
     """Extract timestamp from filename: garden_YYYYMMDD_HHMMSS.jpg"""
     try:
@@ -254,7 +291,31 @@ def get_gardencam_stats(limit=500):
         return []
 
 
+def get_lambda_execution_stats(limit=1000):
+    """Get Lambda execution statistics from DynamoDB."""
+    if not BOTO3_AVAILABLE:
+        return []
+
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+        table = dynamodb.Table('lambda-execution-logs')
+
+        response = table.scan(Limit=limit)
+        items = response.get('Items', [])
+
+        # Sort by timestamp
+        items.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+
+        return items
+    except Exception as e:
+        print(f"Error fetching Lambda execution stats from DynamoDB: {e}")
+        return []
+
+
 def lambda_handler(event, context):
+    import time
+    start_time = time.time()
+
     # Log connection details to DynamoDB
     log_connection(event, context)
 
@@ -349,10 +410,16 @@ def lambda_handler(event, context):
         stats = get_gardencam_stats(limit=500)
 
         # Prepare data for Chart.js
+        # Note on noise floor and autocontrast:
+        # - SD (noise floor) is NOT affected by shifts but IS affected by scaling
+        # - Autocontrast scales by 255/(max-min), so post_ac_sd = pre_ac_sd * 255/dynamic_range
+        # - We use noise_floor_post_ac for the chart so all values are comparable
+        #   (including manually measured averaged images which were measured after autocontrast)
         timestamps = []
         avg_brightness_data = []
         peak_brightness_data = []
-        noise_floor_data = []
+        noise_floor_data = []  # Post-autocontrast SD for comparability
+        noise_floor_pre_ac = []  # Pre-autocontrast SD (raw)
         modes = []
 
         for item in reversed(stats):  # Reverse to show oldest first in chart
@@ -367,8 +434,37 @@ def lambda_handler(event, context):
 
                 avg_brightness_data.append(float(item.get('avg_brightness', 0)))
                 peak_brightness_data.append(float(item.get('peak_brightness', 0)))
-                noise_floor_data.append(float(item.get('noise_floor', 0)))
+                # Use post-autocontrast noise floor if available, fall back to pre-AC
+                post_ac = item.get('noise_floor_post_ac')
+                pre_ac = float(item.get('noise_floor', 0))
+                if post_ac is not None:
+                    noise_floor_data.append(float(post_ac))
+                else:
+                    # Old data without post_ac: estimate it from pre_ac and dynamic range
+                    min_b = float(item.get('min_brightness', 0))
+                    max_b = float(item.get('peak_brightness', 255))
+                    dynamic_range = max_b - min_b
+                    if dynamic_range > 0:
+                        noise_floor_data.append(pre_ac * 255.0 / dynamic_range)
+                    else:
+                        noise_floor_data.append(pre_ac)
+                noise_floor_pre_ac.append(pre_ac)
                 modes.append(item.get('mode', 'unknown'))
+
+        # Get averaged images data for noise floor comparison
+        averaged_timestamps = []
+        averaged_noise_floor = []
+
+        # Known averaged images (measured after autocontrast, comparable to noise_floor_post_ac)
+        known_averaged = [
+            ('2026-01-20 06:00:00', 41.5),  # averaged_20260120_04-07.jpg (24 images)
+        ]
+
+        for ts, noise in known_averaged:
+            averaged_timestamps.append(ts)
+            averaged_noise_floor.append(noise)
+
+        print(f"Showing {len(averaged_timestamps)} averaged images on noise floor chart")
 
         html += f'''
         <title>Garden Camera Statistics</title>
@@ -429,7 +525,7 @@ def lambda_handler(event, context):
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Noise Floor Over Time</div>
+            <div class="chart-title">Noise Floor Over Time (Post-Autocontrast SD)</div>
             <canvas id="noiseChart"></canvas>
         </div>
 
@@ -438,6 +534,8 @@ def lambda_handler(event, context):
         const avgBrightness = {json.dumps(avg_brightness_data)};
         const peakBrightness = {json.dumps(peak_brightness_data)};
         const noiseFloor = {json.dumps(noise_floor_data)};
+        const averagedTimestamps = {json.dumps(averaged_timestamps)};
+        const averagedNoiseFloor = {json.dumps(averaged_noise_floor)};
 
         const chartOptions = {{
             responsive: true,
@@ -487,17 +585,39 @@ def lambda_handler(event, context):
             options: chartOptions
         }});
 
+        // Prepare averaged image data points for scatter plot
+        const averagedDataPoints = averagedTimestamps.map((ts, i) => ({{
+            x: ts,
+            y: averagedNoiseFloor[i]
+        }}));
+
         new Chart(document.getElementById('noiseChart'), {{
             type: 'line',
             data: {{
                 labels: timestamps,
-                datasets: [{{
-                    label: 'Noise Floor (Std Dev)',
-                    data: noiseFloor,
-                    borderColor: '#10b981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                    tension: 0.3
-                }}]
+                datasets: [
+                    {{
+                        label: 'Noise Floor (Post-AC SD)',
+                        data: noiseFloor,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.3,
+                        type: 'line',
+                        order: 2
+                    }},
+                    {{
+                        label: 'Averaged Images (Expected)',
+                        data: averagedDataPoints,
+                        borderColor: '#ef4444',
+                        backgroundColor: '#ef4444',
+                        pointRadius: 12,
+                        pointHoverRadius: 15,
+                        pointStyle: 'circle',
+                        showLine: false,
+                        type: 'scatter',
+                        order: 1
+                    }}
+                ]
             }},
             options: chartOptions
         }});
@@ -835,9 +955,231 @@ def lambda_handler(event, context):
             html += '</div>'
         else:
             html += '<title>Garden Camera</title><h1>Garden Camera</h1><p>No images available yet.</p>'
+
+    elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
+        # Lambda execution statistics page
+        stats = get_lambda_execution_stats(limit=1000)
+
+        # Aggregate data by day
+        from collections import defaultdict
+        from decimal import Decimal
+
+        daily_stats = defaultdict(lambda: {
+            'count': 0,
+            'total_duration_ms': Decimal('0'),
+            'total_cost_usd': Decimal('0'),
+            'paths': defaultdict(int)
+        })
+
+        for item in stats:
+            ts = item.get('timestamp', '')
+            if ts:
+                date = ts.split('T')[0]  # Get just the date part
+                daily_stats[date]['count'] += 1
+                daily_stats[date]['total_duration_ms'] += Decimal(str(item.get('duration_ms', 0)))
+                daily_stats[date]['total_cost_usd'] += Decimal(str(item.get('estimated_cost_usd', 0)))
+                path_item = item.get('path', 'unknown')
+                daily_stats[date]['paths'][path_item] += 1
+
+        # Sort by date
+        sorted_dates = sorted(daily_stats.keys(), reverse=True)
+
+        # Prepare chart data
+        chart_dates = []
+        chart_counts = []
+        chart_durations = []
+        chart_costs = []
+
+        for date in reversed(sorted_dates[-30:]):  # Last 30 days
+            chart_dates.append(date)
+            chart_counts.append(daily_stats[date]['count'])
+            chart_durations.append(float(daily_stats[date]['total_duration_ms']))
+            chart_costs.append(float(daily_stats[date]['total_cost_usd']))
+
+        total_executions = sum(d['count'] for d in daily_stats.values())
+        total_cost = sum(d['total_cost_usd'] for d in daily_stats.values())
+        total_duration = sum(d['total_duration_ms'] for d in daily_stats.values())
+
+        html += f'''
+        <title>Lambda Execution Statistics</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+            .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+            .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+            .nav a:hover {{ background: #3a3a3a; }}
+            h1 {{ text-align: center; margin-bottom: 2rem; }}
+            .chart-container {{ max-width: 1400px; margin: 0 auto 3rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
+            .chart-title {{ font-size: 1.2rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
+            canvas {{ max-height: 400px; }}
+            .stats-summary {{ max-width: 1400px; margin: 0 auto 2rem auto; padding: 1rem; background: #2a2a2a; border-radius: 8px; }}
+            .stats-summary h2 {{ margin-top: 0; color: #aaa; }}
+            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }}
+            .stat-box {{ background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }}
+            .stat-value {{ font-size: 2rem; font-weight: bold; color: #4a9eff; }}
+            .stat-label {{ color: #888; margin-top: 0.5rem; }}
+            .daily-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
+            .daily-table th, .daily-table td {{ padding: 0.5rem; text-align: left; border-bottom: 1px solid #3a3a3a; }}
+            .daily-table th {{ color: #aaa; background: #1a1a1a; }}
+        </style>
+        <div class="nav">
+            <a href="../contents">Home</a>
+        </div>
+        <h1>Lambda Execution Statistics</h1>
+
+        <div class="stats-summary">
+            <h2>Summary (All Time)</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value">{total_executions}</div>
+                    <div class="stat-label">Total Executions</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">${float(total_cost):.4f}</div>
+                    <div class="stat-label">Total Cost (USD)</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{float(total_duration)/1000:.1f}s</div>
+                    <div class="stat-label">Total Runtime</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{float(total_duration)/total_executions if total_executions > 0 else 0:.0f}ms</div>
+                    <div class="stat-label">Avg Duration</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Daily Execution Count</div>
+            <canvas id="countChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Daily Total Duration (seconds)</div>
+            <canvas id="durationChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Daily Cost (USD)</div>
+            <canvas id="costChart"></canvas>
+        </div>
+
+        <div class="stats-summary">
+            <h2>Daily Breakdown</h2>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Executions</th>
+                        <th>Total Duration</th>
+                        <th>Avg Duration</th>
+                        <th>Cost (USD)</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for date in sorted_dates[:30]:  # Show last 30 days
+            day_data = daily_stats[date]
+            avg_duration = float(day_data['total_duration_ms']) / day_data['count']
+            html += f'''
+                    <tr>
+                        <td>{date}</td>
+                        <td>{day_data['count']}</td>
+                        <td>{float(day_data['total_duration_ms'])/1000:.1f}s</td>
+                        <td>{avg_duration:.0f}ms</td>
+                        <td>${float(day_data['total_cost_usd']):.4f}</td>
+                    </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+        const chartDates = ''' + str(chart_dates) + ''';
+        const chartCounts = ''' + str(chart_counts) + ''';
+        const chartDurations = ''' + str([d/1000 for d in chart_durations]) + ''';
+        const chartCosts = ''' + str(chart_costs) + ''';
+
+        // Count Chart
+        new Chart(document.getElementById('countChart'), {
+            type: 'line',
+            data: {
+                labels: chartDates,
+                datasets: [{
+                    label: 'Executions',
+                    data: chartCounts,
+                    borderColor: '#4a9eff',
+                    backgroundColor: 'rgba(74, 158, 255, 0.1)',
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#fff' } } },
+                scales: {
+                    x: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } },
+                    y: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } }
+                }
+            }
+        });
+
+        // Duration Chart
+        new Chart(document.getElementById('durationChart'), {
+            type: 'bar',
+            data: {
+                labels: chartDates,
+                datasets: [{
+                    label: 'Duration (seconds)',
+                    data: chartDurations,
+                    backgroundColor: '#6a5acd',
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#fff' } } },
+                scales: {
+                    x: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } },
+                    y: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } }
+                }
+            }
+        });
+
+        // Cost Chart
+        new Chart(document.getElementById('costChart'), {
+            type: 'bar',
+            data: {
+                labels: chartDates,
+                datasets: [{
+                    label: 'Cost (USD)',
+                    data: chartCosts,
+                    backgroundColor: '#32cd32',
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: '#fff' } } },
+                scales: {
+                    x: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } },
+                    y: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } }
+                }
+            }
+        });
+        </script>
+        '''
+
     else:
         html += open('cv.html', 'r').read()
     content = f'<html><head>{fav}{html}</body></html>'
+
+    # Log execution metrics
+    duration_ms = (time.time() - start_time) * 1000
+    log_execution_metrics(context, duration_ms, path)
 
     return {
         'statusCode': 200,
