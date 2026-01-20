@@ -257,6 +257,47 @@ def lambda_handler(event, context):
         html = open("gitinfo.html", "r").read()
     elif path == f'/{stage}/contents' or path == '/contents':
         html += open('contents.html', 'r').read()
+    elif path.startswith(f'/{stage}/gardencam/capture') or path.startswith('/gardencam/capture'):
+        # Capture command endpoint
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': json.dumps({'error': 'Unauthorized'}),
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        # Write command to DynamoDB
+        try:
+            dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+            table = dynamodb.Table('gardencam-commands')
+
+            command_id = f"capture_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            item = {
+                'command_id': command_id,
+                'command': 'take_picture',
+                'status': 'pending',
+                'created_at': datetime.utcnow().isoformat(),
+                'requested_by': event['headers'].get('X-Forwarded-For', 'unknown')
+            }
+
+            table.put_item(Item=item)
+
+            return {
+                'statusCode': 200,
+                'body': json.dumps({'message': 'Capture command sent! Image will appear shortly.', 'command_id': command_id}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+        except Exception as e:
+            print(f"Error writing capture command: {e}")
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': 'Failed to send capture command'}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+
     elif path.startswith(f'/{stage}/gardencam/stats') or path.startswith('/gardencam/stats'):
         # Stats visualization page
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -684,6 +725,35 @@ def lambda_handler(event, context):
             <h1>Garden Camera</h1>
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
             <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">View Statistics</a>
+            <button id="captureBtn" class="gallery-link" style="margin-left: 0.5rem; cursor: pointer;">📷 Capture Now</button>
+            <div id="captureStatus" style="margin-top: 0.5rem; font-size: 0.9rem;"></div>
+            <script>
+            document.getElementById('captureBtn').addEventListener('click', function() {{
+                const btn = this;
+                const status = document.getElementById('captureStatus');
+                btn.disabled = true;
+                btn.textContent = '📷 Capturing...';
+                status.textContent = 'Sending capture command...';
+                status.style.color = '#4a9eff';
+
+                fetch('gardencam/capture', {{ method: 'POST' }})
+                    .then(response => response.json())
+                    .then(data => {{
+                        status.textContent = data.message || 'Capture command sent! Image will appear in ~30 seconds.';
+                        status.style.color = '#10b981';
+                        setTimeout(() => {{
+                            btn.disabled = false;
+                            btn.textContent = '📷 Capture Now';
+                        }}, 3000);
+                    }})
+                    .catch(error => {{
+                        status.textContent = 'Error: ' + error.message;
+                        status.style.color = '#ef4444';
+                        btn.disabled = false;
+                        btn.textContent = '📷 Capture Now';
+                    }});
+            }});
+            </script>
             <div class="gallery">
             '''
             labels = ['Latest', 'Previous', 'Earlier']
