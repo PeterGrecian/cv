@@ -197,6 +197,27 @@ def group_images_by_4hour_periods(images):
     return sorted_periods
 
 
+def get_gardencam_stats(limit=500):
+    """Get image statistics from DynamoDB."""
+    if not BOTO3_AVAILABLE:
+        return []
+
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+        table = dynamodb.Table('gardencam-stats')
+
+        response = table.scan(Limit=limit)
+        items = response.get('Items', [])
+
+        # Sort by timestamp
+        items.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+
+        return items
+    except Exception as e:
+        print(f"Error fetching stats from DynamoDB: {e}")
+        return []
+
+
 def lambda_handler(event, context):
     # Log connection details to DynamoDB
     log_connection(event, context)
@@ -235,6 +256,174 @@ def lambda_handler(event, context):
         html = open("gitinfo.html", "r").read()
     elif path == f'/{stage}/contents' or path == '/contents':
         html += open('contents.html', 'r').read()
+    elif path.startswith(f'/{stage}/gardencam/stats') or path.startswith('/gardencam/stats'):
+        # Stats visualization page
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        stats = get_gardencam_stats(limit=500)
+
+        # Prepare data for Chart.js
+        timestamps = []
+        avg_brightness_data = []
+        peak_brightness_data = []
+        noise_floor_data = []
+        modes = []
+
+        for item in reversed(stats):  # Reverse to show oldest first in chart
+            ts = item.get('timestamp', '')
+            if ts:
+                # Format timestamp for display (just date and time, no milliseconds)
+                try:
+                    dt_str = ts.split('.')[0].replace('T', ' ')
+                    timestamps.append(dt_str)
+                except:
+                    timestamps.append(ts)
+
+                avg_brightness_data.append(float(item.get('avg_brightness', 0)))
+                peak_brightness_data.append(float(item.get('peak_brightness', 0)))
+                noise_floor_data.append(float(item.get('noise_floor', 0)))
+                modes.append(item.get('mode', 'unknown'))
+
+        html += f'''
+        <title>Garden Camera Statistics</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+            .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+            .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+            .nav a:hover {{ background: #3a3a3a; }}
+            h1 {{ text-align: center; margin-bottom: 2rem; }}
+            .chart-container {{ max-width: 1400px; margin: 0 auto 3rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
+            .chart-title {{ font-size: 1.2rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
+            canvas {{ max-height: 400px; }}
+            .stats-summary {{ max-width: 1400px; margin: 0 auto 2rem auto; padding: 1rem; background: #2a2a2a; border-radius: 8px; }}
+            .stats-summary h2 {{ margin-top: 0; color: #aaa; }}
+            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }}
+            .stat-box {{ background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }}
+            .stat-value {{ font-size: 2rem; font-weight: bold; color: #4a9eff; }}
+            .stat-label {{ color: #888; margin-top: 0.5rem; }}
+        </style>
+        <div class="nav">
+            <a href="../gardencam">← Back to Latest</a>
+            <a href="gallery">View Gallery</a>
+        </div>
+        <h1>Garden Camera Statistics</h1>
+
+        <div class="stats-summary">
+            <h2>Summary (Last {len(stats)} images)</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value">{len(stats)}</div>
+                    <div class="stat-label">Total Images</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{sum(1 for m in modes if m == 'day')}</div>
+                    <div class="stat-label">Day Mode</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{sum(1 for m in modes if m == 'night')}</div>
+                    <div class="stat-label">Night Mode</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{sum(avg_brightness_data)/len(avg_brightness_data):.1f}</div>
+                    <div class="stat-label">Avg Brightness</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Average Brightness Over Time</div>
+            <canvas id="brightnessChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Peak Brightness Over Time</div>
+            <canvas id="peakChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Noise Floor Over Time</div>
+            <canvas id="noiseChart"></canvas>
+        </div>
+
+        <script>
+        const timestamps = {json.dumps(timestamps)};
+        const avgBrightness = {json.dumps(avg_brightness_data)};
+        const peakBrightness = {json.dumps(peak_brightness_data)};
+        const noiseFloor = {json.dumps(noise_floor_data)};
+
+        const chartOptions = {{
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {{
+                x: {{
+                    ticks: {{ color: '#888', maxTicksLimit: 10 }},
+                    grid: {{ color: '#333' }}
+                }},
+                y: {{
+                    ticks: {{ color: '#888' }},
+                    grid: {{ color: '#333' }}
+                }}
+            }},
+            plugins: {{
+                legend: {{ labels: {{ color: '#aaa' }} }}
+            }}
+        }};
+
+        new Chart(document.getElementById('brightnessChart'), {{
+            type: 'line',
+            data: {{
+                labels: timestamps,
+                datasets: [{{
+                    label: 'Average Brightness',
+                    data: avgBrightness,
+                    borderColor: '#4a9eff',
+                    backgroundColor: 'rgba(74, 158, 255, 0.1)',
+                    tension: 0.3
+                }}]
+            }},
+            options: chartOptions
+        }});
+
+        new Chart(document.getElementById('peakChart'), {{
+            type: 'line',
+            data: {{
+                labels: timestamps,
+                datasets: [{{
+                    label: 'Peak Brightness',
+                    data: peakBrightness,
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    tension: 0.3
+                }}]
+            }},
+            options: chartOptions
+        }});
+
+        new Chart(document.getElementById('noiseChart'), {{
+            type: 'line',
+            data: {{
+                labels: timestamps,
+                datasets: [{{
+                    label: 'Noise Floor (Std Dev)',
+                    data: noiseFloor,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.3
+                }}]
+            }},
+            options: chartOptions
+        }});
+        </script>
+        '''
     elif path.startswith(f'/{stage}/gardencam/fullres') or path.startswith('/gardencam/fullres'):
         # Full resolution image view
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -352,6 +541,7 @@ def lambda_handler(event, context):
             </style>
             <div class="nav">
                 <a href="../gardencam">← Back to Latest</a>
+                <a href="stats">View Statistics</a>
             </div>
             <h1>Garden Camera Gallery Index</h1>
             <div class="period-list">
@@ -486,6 +676,7 @@ def lambda_handler(event, context):
             </style>
             <h1>Garden Camera</h1>
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
+            <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">View Statistics</a>
             <div class="gallery">
             '''
             labels = ['Latest', 'Previous', 'Earlier']

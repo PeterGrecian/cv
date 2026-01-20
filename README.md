@@ -8,9 +8,11 @@ Lambda is used to publish web pages via API gateway.  If the website gets more c
 - `/event` - Debug info showing Lambda event and context
 - `/gitinfo` - Git commit information for deployed code
 - `/gardencam` - Password-protected garden camera (displays latest 3 images)
-- `/gardencam/gallery` - Gallery view with thumbnails organized by 4-hour periods
+- `/gardencam/gallery` - Gallery index listing all 4-hour periods
+- `/gardencam/gallery?period=<period>` - Gallery view for specific 4-hour period
 - `/gardencam/display?key=<image_key>` - Display-width view of specific image
 - `/gardencam/fullres?key=<image_key>` - Full resolution view of specific image
+- `/gardencam/stats` - Interactive charts showing brightness statistics over time
 
 The script "update" is used to zip and push the assets to AWS.  It provides git info on the website which can be used to confirm the state of the live code.  The pattern of use is:
 ```
@@ -77,6 +79,30 @@ The `/gardencam` route displays the latest 3 images captured by a Raspberry Pi c
   - Navigation: Back to Latest | View Gallery | View Full Resolution
 - **Full Resolution View** (`/gardencam/fullres`): Original image at full resolution
   - Navigation: Back to Latest | View Gallery
+
+### Adaptive Exposure & Statistics
+
+The camera script now features intelligent day/night detection:
+- **Day Mode**: Automatic exposure when sufficient light detected (brightness > 30)
+- **Night Mode**: Long exposure (up to 60 seconds) with adaptive adjustment based on scene brightness
+- **Test Shot**: Takes a quick 0.1s test exposure to determine mode before final capture
+
+**Image Statistics Collection**:
+- Average brightness, peak brightness, minimum brightness
+- Noise floor (standard deviation)
+- Median brightness
+- Capture mode (day/night)
+- All stats stored in DynamoDB table `gardencam-stats`
+
+**Statistics Visualization** (`/gardencam/stats`):
+- Interactive Chart.js graphs showing brightness trends over time
+- Summary statistics (total images, day/night mode counts, average brightness)
+- Three charts: Average Brightness, Peak Brightness, Noise Floor
+
+**Configuration**:
+- Camera parameters configured via YAML file (`config.yaml`)
+- Adjustable thresholds, exposure times, gain settings
+- Enable/disable features (autocontrast, stats collection, DynamoDB storage)
 
 ### Related Repository
 See `~/Berrylands/gardencam/` for the Raspberry Pi capture script and setup instructions.
