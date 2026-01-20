@@ -331,51 +331,111 @@ def lambda_handler(event, context):
         all_images = get_all_gardencam_images()
         periods = group_images_by_4hour_periods(all_images)
 
-        html += '''
-        <title>Garden Camera Gallery</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
-            .nav { text-align: center; margin-bottom: 1rem; }
-            .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; }
-            .nav a:hover { text-decoration: underline; }
-            h1 { text-align: center; margin-bottom: 2rem; }
-            .period { margin-bottom: 3rem; }
-            .period-header { font-size: 1.3rem; color: #aaa; margin-bottom: 1rem; padding: 0.5rem; background: #2a2a2a; border-radius: 6px; }
-            .thumbnails { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
-            .thumb-container { position: relative; }
-            .thumb-container a { display: block; }
-            .thumb-container img { width: 100%; height: 150px; object-fit: cover; border-radius: 6px; transition: transform 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }
-            .thumb-container img:hover { transform: scale(1.05); }
-            .thumb-time { text-align: center; font-size: 0.85rem; color: #888; margin-top: 0.3rem; }
+        # Get query parameters
+        query_params = event.get('queryStringParameters', {}) or {}
+        period_param = query_params.get('period', '')
 
-            @media (max-width: 768px) {
-                .thumbnails { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
-                .thumb-container img { height: 120px; }
-            }
-        </style>
-        <div class="nav">
-            <a href="../gardencam">← Back to Latest</a>
-        </div>
-        <h1>Garden Camera Gallery</h1>
-        '''
+        # If no period specified, show index of all periods
+        if not period_param:
+            html += '''
+            <title>Garden Camera Gallery Index</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
+                .nav { text-align: center; margin-bottom: 2rem; }
+                .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; }
+                .nav a:hover { text-decoration: underline; }
+                h1 { text-align: center; margin-bottom: 2rem; }
+                .period-list { max-width: 800px; margin: 0 auto; }
+                .period-link { display: block; padding: 1rem 1.5rem; margin-bottom: 0.75rem; background: #2a2a2a; border-radius: 8px; text-decoration: none; color: #4a9eff; font-size: 1.1rem; transition: background 0.3s; }
+                .period-link:hover { background: #3a3a3a; }
+                .period-count { float: right; color: #888; font-size: 0.9rem; }
+            </style>
+            <div class="nav">
+                <a href="../gardencam">← Back to Latest</a>
+            </div>
+            <h1>Garden Camera Gallery Index</h1>
+            <div class="period-list">
+            '''
 
-        for period_name, period_images in periods:
-            html += f'<div class="period"><div class="period-header">{period_name} UTC</div><div class="thumbnails">'
-
-            for img in period_images:
-                thumb_url = get_presigned_url(img['key'])
-                time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
-
+            for period_name, period_images in periods:
+                image_count = len(period_images)
                 html += f'''
-                <div class="thumb-container">
-                    <a href="display?key={img['key']}">
-                        <img src="{thumb_url}" alt="{img['timestamp']}">
-                    </a>
-                    <div class="thumb-time">{time_only}</div>
-                </div>
+                <a href="gallery?period={period_name}" class="period-link">
+                    {period_name} UTC
+                    <span class="period-count">{image_count} image{"s" if image_count != 1 else ""}</span>
+                </a>
                 '''
 
-            html += '</div></div>'
+            html += '</div>'
+
+        else:
+            # Show specific period
+            # Find the requested period
+            period_index = None
+            current_period_images = []
+            for idx, (period_name, period_images) in enumerate(periods):
+                if period_name == period_param:
+                    period_index = idx
+                    current_period_images = period_images
+                    break
+
+            if period_index is None:
+                html += '<h1>Period not found</h1><p><a href="gallery">Back to Gallery Index</a></p>'
+            else:
+                # Build navigation links
+                prev_link = ''
+                next_link = ''
+                if period_index > 0:
+                    prev_period = periods[period_index - 1][0]
+                    prev_link = f'<a href="gallery?period={prev_period}">← Previous</a>'
+                if period_index < len(periods) - 1:
+                    next_period = periods[period_index + 1][0]
+                    next_link = f'<a href="gallery?period={next_period}">Next →</a>'
+
+                html += f'''
+                <title>{period_param} - Gallery</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+                    .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+                    .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+                    .nav a:hover {{ background: #3a3a3a; }}
+                    h1 {{ text-align: center; margin-bottom: 2rem; }}
+                    .thumbnails {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; max-width: 1400px; margin: 0 auto; }}
+                    .thumb-container {{ position: relative; }}
+                    .thumb-container a {{ display: block; }}
+                    .thumb-container img {{ width: 100%; height: 150px; object-fit: cover; border-radius: 6px; transition: transform 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.5); }}
+                    .thumb-container img:hover {{ transform: scale(1.05); }}
+                    .thumb-time {{ text-align: center; font-size: 0.85rem; color: #888; margin-top: 0.3rem; }}
+
+                    @media (max-width: 768px) {{
+                        .thumbnails {{ grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }}
+                        .thumb-container img {{ height: 120px; }}
+                    }}
+                </style>
+                <div class="nav">
+                    {prev_link}
+                    <a href="gallery">Index</a>
+                    <a href="../gardencam">Latest</a>
+                    {next_link}
+                </div>
+                <h1>{period_param} UTC</h1>
+                <div class="thumbnails">
+                '''
+
+                for img in current_period_images:
+                    thumb_url = get_presigned_url(img['key'])
+                    time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
+
+                    html += f'''
+                    <div class="thumb-container">
+                        <a href="display?key={img['key']}">
+                            <img src="{thumb_url}" alt="{img['timestamp']}">
+                        </a>
+                        <div class="thumb-time">{time_only}</div>
+                    </div>
+                    '''
+
+                html += '</div>'
 
     elif path == f'/{stage}/gardencam' or path == '/gardencam':
         # Check authentication

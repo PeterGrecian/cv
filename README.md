@@ -64,9 +64,13 @@ The `/gardencam` route displays the latest 3 images captured by a Raspberry Pi c
 
 ### Gallery Features
 - **Main View** (`/gardencam`): Shows latest 3 images with "View Full Gallery" link
-- **Gallery View** (`/gardencam/gallery`): All images organized by 4-hour time periods
+- **Gallery Index** (`/gardencam/gallery`): Lists all 4-hour periods with image counts
+  - Fast loading - no images loaded on index page
+  - Click any period to view that period's images
+- **Gallery Period View** (`/gardencam/gallery?period=<period>`): One 4-hour period per page
   - Images grouped into periods: 0-3, 4-7, 8-11, 12-15, 16-19, 20-23 hours
   - Grid layout with thumbnails (200px on desktop, 150px on mobile)
+  - Navigation: Previous | Index | Latest | Next
   - Each thumbnail links to display-width view
 - **Display-Width View** (`/gardencam/display`): Optimized for screen viewing (max 1920px)
   - Clickable image links to full resolution
