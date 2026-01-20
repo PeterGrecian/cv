@@ -140,6 +140,10 @@ def get_all_gardencam_images():
 
     for obj in objects:
         key = obj["Key"]
+        # Only include main garden images (not thumbnails or averaged images)
+        if not key.startswith('garden_') or not key.endswith('.jpg'):
+            continue
+
         timestamp = parse_timestamp_from_key(key) or obj["LastModified"].strftime("%Y-%m-%d %H:%M:%S")
 
         images.append({
@@ -149,6 +153,19 @@ def get_all_gardencam_images():
         })
 
     return images
+
+
+def get_image_dimensions(s3_client, key):
+    """Get image dimensions from S3 object."""
+    try:
+        from PIL import Image
+        from io import BytesIO
+
+        response = s3_client.get_object(Bucket=GARDENCAM_BUCKET, Key=key)
+        img = Image.open(BytesIO(response['Body'].read()))
+        return img.size  # Returns (width, height)
+    except:
+        return None
 
 
 def get_latest_gardencam_images(count=3):
@@ -174,11 +191,16 @@ def get_latest_gardencam_images(count=3):
         # Full-res URL for click-through
         full_url = get_presigned_url(img['key'])
 
+        # Get image dimensions
+        dimensions = get_image_dimensions(s3, img['key'])
+        resolution = f"{dimensions[0]}×{dimensions[1]}" if dimensions else ""
+
         images.append({
             'url': display_url,
             'full_url': full_url,
             'timestamp': img['timestamp'],
-            'key': img['key']
+            'key': img['key'],
+            'resolution': resolution
         })
 
     return images
@@ -668,8 +690,43 @@ def lambda_handler(event, context):
                     {next_link}
                 </div>
                 <h1>{period_param} UTC</h1>
-                <div class="thumbnails">
                 '''
+
+                # Check for averaged image for this period
+                try:
+                    date_part = period_param.split()[0].replace('-', '')
+                    time_range = period_param.split()[1]
+                    start_hour = int(time_range.split(':')[0])
+                    # Period is "04:00-07:59", so end hour should be 7 (last hour in range)
+                    end_hour = int(time_range.split('-')[1].split(':')[0])
+
+                    # Check if averaged image exists
+                    averaged_key = f"averaged_medium_{date_part}_{start_hour:02d}-{end_hour:02d}.jpg"
+                    averaged_full_key = f"averaged_{date_part}_{start_hour:02d}-{end_hour:02d}.jpg"
+
+                    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+                    try:
+                        s3.head_object(Bucket=GARDENCAM_BUCKET, Key=averaged_key)
+                        has_averaged = True
+                    except:
+                        has_averaged = False
+                except:
+                    has_averaged = False
+
+                if has_averaged:
+                    # Show averaged image at the top
+                    averaged_url = get_presigned_url(averaged_key)
+                    averaged_full_url = get_presigned_url(averaged_full_key)
+                    html += f'''
+                    <div style="text-align: center; margin-bottom: 2rem; padding: 1rem; background: #2a2a2a; border-radius: 8px;">
+                        <div style="color: #4a9eff; margin-bottom: 0.5rem; font-size: 1.1rem;">⭐ Averaged from {len(current_period_images)} images</div>
+                        <a href="display?key={averaged_full_key}" style="display: inline-block; max-width: 800px;">
+                            <img src="{averaged_url}" alt="Averaged {period_param}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+                        </a>
+                    </div>
+                    '''
+
+                html += '<div class="thumbnails">'
 
                 for img in current_period_images:
                     thumb_url = get_presigned_url(img['key'])
@@ -765,13 +822,14 @@ def lambda_handler(event, context):
             labels = ['Latest', 'Previous', 'Earlier']
             for idx, img in enumerate(images):
                 label = labels[idx] if idx < len(labels) else f'Image {idx+1}'
+                resolution_display = f" • {img['resolution']}" if img.get('resolution') else ""
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
                     <a href="gardencam/display?key={img['key']}">
                         <img src="{img['url']}" alt="{label} capture">
                     </a>
-                    <p class="timestamp">{img['timestamp']} UTC</p>
+                    <p class="timestamp">{img['timestamp']}{resolution_display}</p>
                 </div>
                 '''
             html += '</div>'
