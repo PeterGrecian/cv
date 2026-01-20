@@ -240,6 +240,7 @@ def lambda_handler(event, context):
     print(f'X-Forwarded-For = {ip}')
 
     if path == f'/{stage}/event' or path == '/event':   # debugging info
+        html += '<div style="text-align: center; margin: 1rem;"><a href="contents" style="color: #4a9eff; text-decoration: none;">Home</a></div>'
         html += 'log_group = ' + context.log_group_name + '<br>'
         html += 'log_stream = ' + context.log_stream_name + '<br>' 
         html += 'path = ' + path + '<br>'
@@ -312,8 +313,9 @@ def lambda_handler(event, context):
             .stat-label {{ color: #888; margin-top: 0.5rem; }}
         </style>
         <div class="nav">
-            <a href="../gardencam">← Back to Latest</a>
-            <a href="gallery">View Gallery</a>
+            <a href="../../contents">Home</a>
+            <a href="../gardencam">Latest</a>
+            <a href="gallery">Gallery</a>
         </div>
         <h1>Garden Camera Statistics</h1>
 
@@ -455,7 +457,7 @@ def lambda_handler(event, context):
                 img {{ max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
             <div class="nav">
-                <a href="../gardencam">← Back to Latest</a> | <a href="gallery">View Gallery</a>
+                <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a>
             </div>
             <h2>{timestamp} UTC</h2>
             <img src="{image_url}" alt="Full resolution image">
@@ -494,7 +496,7 @@ def lambda_handler(event, context):
                 img {{ width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
             <div class="nav">
-                <a href="../gardencam">← Back to Latest</a> | <a href="gallery">View Gallery</a> | <a href="fullres?key={image_key}">View Full Resolution</a>
+                <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="fullres?key={image_key}">Full Res</a>
             </div>
             <h2>{timestamp} UTC</h2>
             <div class="image-container">
@@ -540,8 +542,9 @@ def lambda_handler(event, context):
                 .period-count { float: right; color: #888; font-size: 0.9rem; }
             </style>
             <div class="nav">
-                <a href="../gardencam">← Back to Latest</a>
-                <a href="stats">View Statistics</a>
+                <a href="../../contents">Home</a>
+                <a href="../gardencam">Latest</a>
+                <a href="stats">Statistics</a>
             </div>
             <h1>Garden Camera Gallery Index</h1>
             <div class="period-list">
@@ -603,6 +606,7 @@ def lambda_handler(event, context):
                     }}
                 </style>
                 <div class="nav">
+                    <a href="../../contents">Home</a>
                     {prev_link}
                     <a href="gallery">Index</a>
                     <a href="../gardencam">Latest</a>
@@ -674,6 +678,9 @@ def lambda_handler(event, context):
                     .timestamp { font-size: 0.85rem; }
                 }
             </style>
+            <div style="text-align: center; margin-bottom: 1rem;">
+                <a href="contents" style="color: #4a9eff; text-decoration: none;">Home</a>
+            </div>
             <h1>Garden Camera</h1>
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
             <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">View Statistics</a>

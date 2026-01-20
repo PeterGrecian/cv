@@ -30,6 +30,7 @@ aws s3 cp cv.html s3://$bucket/index.html
 # generate gitinfo so the git version is visible on site
 echo '<link rel="stylesheet" href="styles.css">' > gitinfo.html
 echo '<title>Peter Grecian - Git Info</title>' >> gitinfo.html
+echo '<div style="text-align: center; margin: 1rem;"><a href="contents" style="color: #4a9eff; text-decoration: none;">Home</a></div>' >> gitinfo.html
 origin=$(git remote get-url origin)
 log=$(git log -1 --oneline)
 date=$(date)
