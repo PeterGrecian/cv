@@ -159,16 +159,23 @@ def get_latest_gardencam_images(count=3):
     all_images = get_all_gardencam_images()
     images = []
 
+    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+
     for img in all_images[:count]:
-        # Use thumbnail for faster page load
+        # Check if thumbnail exists, fall back to full-res if not
         thumb_key = f"thumb_{img['key']}"
-        thumb_url = get_presigned_url(thumb_key)
+        try:
+            s3.head_object(Bucket=GARDENCAM_BUCKET, Key=thumb_key)
+            display_url = get_presigned_url(thumb_key)
+        except:
+            # Thumbnail doesn't exist, use full-res
+            display_url = get_presigned_url(img['key'])
 
         # Full-res URL for click-through
         full_url = get_presigned_url(img['key'])
 
         images.append({
-            'url': thumb_url,
+            'url': display_url,
             'full_url': full_url,
             'timestamp': img['timestamp'],
             'key': img['key']
@@ -708,21 +715,13 @@ def lambda_handler(event, context):
                 .timestamp { color: #888; margin-top: 0.5rem; font-size: 0.9rem; }
                 .label { color: #aaa; font-weight: bold; margin-bottom: 0.5rem; font-size: 1rem; }
 
-                /* Tablet layout */
+                /* Mobile/Tablet - stack vertically */
                 @media (max-width: 1024px) {
-                    h1 { font-size: 1.5rem; margin-bottom: 1rem; }
-                    .gallery { gap: 0.75rem; }
-                    .image-container { min-width: 200px; max-width: 45%; }
-                    .image-container:nth-child(3) { flex-basis: 100%; max-width: 90%; }
-                }
-
-                /* Mobile layout - stack vertically */
-                @media (max-width: 768px) {
                     body { margin: 0.5rem; }
-                    h1 { font-size: 1.25rem; margin-bottom: 0.75rem; }
-                    .gallery { flex-direction: column; gap: 1.5rem; }
+                    h1 { font-size: 1.5rem; margin-bottom: 0.75rem; }
+                    .gallery { flex-direction: column; gap: 1rem; }
                     .image-container { min-width: 100%; max-width: 100%; }
-                    .label { font-size: 1.1rem; }
+                    .label { font-size: 1rem; }
                     .timestamp { font-size: 0.85rem; }
                 }
             </style>
