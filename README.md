@@ -60,8 +60,10 @@ The `/gardencam` route displays the latest 3 images captured by a Raspberry Pi c
 
 ### Image Display
 - Uses S3 presigned URLs instead of base64 encoding (avoids Lambda response size limits)
+- **Performance optimized**: Main page uses 800px thumbnails (~100KB each vs ~800KB full-res)
+  - Page load reduced from ~2.7MB to ~300KB (9x faster)
 - Main page displays 3 images side-by-side with labels: "Latest", "Previous", "Earlier"
-- Images are clickable and link to display-width views
+- Images are clickable and link to display-width views with full resolution
 - Responsive layout: 1024px max-width on desktop, stacks vertically on mobile
 - Dark theme optimized for low-light images
 
