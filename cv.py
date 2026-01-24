@@ -372,26 +372,25 @@ def t3_format_html(arrivals):
 
     def format_times(times):
         if not times:
-            return '<span style="color:#666">--</span>'
-        return ' &nbsp; '.join(f'<span style="color:#4a9eff;font-size:1.5rem">{m}</span>' for m in times)
+            return '<span class="time-box" style="color:#666">--</span>'
+        return ' '.join(f'<span class="time-box">{m}</span>' for m in times)
 
     return f"""
 <title>K2 Parklands</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 body {{ font-family: -apple-system, sans-serif; background: #1a1a1a; color: #fff; padding: 1rem; margin: 0; text-align: center; }}
-.nav {{ margin-bottom: 1rem; }}
-.nav a {{ color: #4a9eff; text-decoration: none; }}
-h1 {{ font-size: 1.2rem; margin-bottom: 0.5rem; }}
-.time {{ font-size: 0.9rem; color: #888; margin-bottom: 1.5rem; }}
+.nav {{ position: absolute; top: 1rem; left: 1rem; }}
+.nav a {{ color: #4a9eff; text-decoration: none; font-size: 0.9rem; }}
+h1 {{ font-size: 1.2rem; margin-top: 0.5rem; margin-bottom: 1.5rem; }}
 .direction {{ margin: 1.5rem 0; }}
 .times {{ font-family: monospace; }}
-.dest {{ font-size: 0.75rem; color: #666; margin-top: 0.3rem; }}
+.time-box {{ display: inline-block; font-size: 3rem; color: #4a9eff; border: 2px solid #4a9eff; border-radius: 8px; padding: 0.3rem 0.8rem; margin: 0 0.3rem; }}
+.dest {{ font-size: 0.75rem; color: #666; margin-top: 0.5rem; }}
 .refresh {{ font-size: 0.8rem; color: #444; margin-top: 2rem; }}
 </style>
 <div class="nav"><a href="contents">Home</a></div>
 <h1>K2 @ Parklands</h1>
-<div class="time">{datetime.now().strftime('%H:%M')}</div>
 <div class="direction">
   <div class="times">{format_times(inbound)}</div>
   <div class="dest">towards Kingston</div>
