@@ -404,9 +404,9 @@ h1 {{ font-size: 1.2rem; margin-top: 1rem; margin-bottom: 3rem; }}
   <div class="times">{format_times(outbound)}</div>
   <div class="dest">towards Hook</div>
 </div>
-<div class="refresh">refresh in <span id="countdown">20</span>s</div>
+<div class="refresh">refresh in <span id="countdown">60</span>s</div>
 <script>
-let t = 20;
+let t = 60;
 const el = document.getElementById('countdown');
 setInterval(() => {{
   t--;
