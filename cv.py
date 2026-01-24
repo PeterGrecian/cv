@@ -387,6 +387,7 @@ h1 {{ font-size: 1.2rem; margin-bottom: 0.5rem; }}
 .direction {{ margin: 1.5rem 0; }}
 .times {{ font-family: monospace; }}
 .dest {{ font-size: 0.75rem; color: #666; margin-top: 0.3rem; }}
+.refresh {{ font-size: 0.8rem; color: #444; margin-top: 2rem; }}
 </style>
 <div class="nav"><a href="contents">Home</a></div>
 <h1>K2 @ Parklands</h1>
@@ -399,6 +400,16 @@ h1 {{ font-size: 1.2rem; margin-bottom: 0.5rem; }}
   <div class="times">{format_times(outbound)}</div>
   <div class="dest">towards Hook</div>
 </div>
+<div class="refresh">refresh in <span id="countdown">20</span>s</div>
+<script>
+let t = 20;
+const el = document.getElementById('countdown');
+setInterval(() => {{
+  t--;
+  if (t <= 0) location.reload();
+  el.textContent = t;
+}}, 1000);
+</script>
 """
 
 
