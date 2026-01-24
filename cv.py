@@ -385,7 +385,6 @@ body {{ font-family: -apple-system, sans-serif; background: #1a1a1a; color: #fff
 h1 {{ font-size: 1.2rem; margin-bottom: 0.5rem; }}
 .time {{ font-size: 0.9rem; color: #888; margin-bottom: 1.5rem; }}
 .direction {{ margin: 1.5rem 0; }}
-.label {{ font-size: 0.9rem; color: #aaa; margin-bottom: 0.5rem; }}
 .times {{ font-family: monospace; }}
 .dest {{ font-size: 0.75rem; color: #666; margin-top: 0.3rem; }}
 </style>
@@ -393,12 +392,10 @@ h1 {{ font-size: 1.2rem; margin-bottom: 0.5rem; }}
 <h1>K2 @ Parklands</h1>
 <div class="time">{datetime.now().strftime('%H:%M')}</div>
 <div class="direction">
-  <div class="label">INBOUND</div>
   <div class="times">{format_times(inbound)}</div>
   <div class="dest">towards Kingston</div>
 </div>
 <div class="direction">
-  <div class="label">OUTBOUND</div>
   <div class="times">{format_times(outbound)}</div>
   <div class="dest">towards Hook</div>
 </div>
