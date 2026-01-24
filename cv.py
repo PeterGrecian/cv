@@ -325,14 +325,14 @@ def get_lambda_execution_stats(limit=1000):
 # ============================================================================
 
 TFL_API_BASE = "https://api.tfl.gov.uk"
-T3_ROUTE = "K2"
-T3_STOP = "Parklands"  # Focus on this stop
+T3_STOP_INBOUND = "490010781S"   # Parklands southbound (towards Kingston)
+T3_STOP_OUTBOUND = "490010781N"  # Parklands northbound (towards Hook)
 T3_BUSES_PER_DIRECTION = 2
 
 
-def t3_fetch_arrivals(api_key=None):
-    """Fetch bus arrivals for Parklands stop from TfL API."""
-    url = f"{TFL_API_BASE}/Line/{T3_ROUTE}/arrivals"
+def t3_fetch_stop(stop_id, api_key=None):
+    """Fetch arrivals for a specific stop."""
+    url = f"{TFL_API_BASE}/StopPoint/{stop_id}/Arrivals"
     if api_key:
         url += f"?app_key={api_key}"
 
@@ -341,28 +341,19 @@ def t3_fetch_arrivals(api_key=None):
         req.add_header('User-Agent', 't3-terse-transport-times/1.0')
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode())
+        return [a.get('timeToStation', 0) // 60 for a in data], None
     except Exception as e:
-        return {}, str(e)
+        return [], str(e)
 
-    # Filter for Parklands and group by direction
-    inbound = []
-    outbound = []
 
-    for arrival in data:
-        stop_name = arrival.get('stationName', '')
-        if T3_STOP.lower() not in stop_name.lower():
-            continue
+def t3_fetch_arrivals(api_key=None):
+    """Fetch bus arrivals for Parklands stop from TfL API."""
+    inbound, err1 = t3_fetch_stop(T3_STOP_INBOUND, api_key)
+    outbound, err2 = t3_fetch_stop(T3_STOP_OUTBOUND, api_key)
 
-        direction = arrival.get('direction', 'unknown')
-        time_to_station = arrival.get('timeToStation', 0)
-        minutes = time_to_station // 60
+    if err1 and err2:
+        return {}, f"{err1}; {err2}"
 
-        if direction == 'inbound':
-            inbound.append(minutes)
-        elif direction == 'outbound':
-            outbound.append(minutes)
-
-    # Sort and take top N
     inbound.sort()
     outbound.sort()
 
