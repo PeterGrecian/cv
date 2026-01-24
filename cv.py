@@ -1,8 +1,9 @@
 from pprint import pformat
 import os
 import base64
+import urllib.request
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import boto3
@@ -310,6 +311,76 @@ def get_lambda_execution_stats(limit=1000):
     except Exception as e:
         print(f"Error fetching Lambda execution stats from DynamoDB: {e}")
         return []
+
+
+# ============================================================================
+# t3 - Terse Transport Times
+# ============================================================================
+
+TFL_API_BASE = "https://api.tfl.gov.uk"
+T3_ROUTE = "K2"
+
+
+def t3_fetch_arrivals(api_key=None):
+    """Fetch bus arrivals from TfL API."""
+    url = f"{TFL_API_BASE}/Line/{T3_ROUTE}/arrivals"
+    if api_key:
+        url += f"?app_key={api_key}"
+
+    try:
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 't3-terse-transport-times/1.0')
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+    except Exception as e:
+        return [], str(e)
+
+    # Group by stop and get nearest bus per direction
+    stops = {}
+    for arrival in data:
+        stop_name = arrival.get('stationName', 'Unknown')
+        direction = arrival.get('direction', 'unknown')
+        time_to_station = arrival.get('timeToStation', 0)
+
+        key = (stop_name, direction)
+        if key not in stops or time_to_station < stops[key]:
+            stops[key] = time_to_station
+
+    # Convert to sorted list
+    results = []
+    for (stop_name, direction), seconds in sorted(stops.items(), key=lambda x: x[1]):
+        minutes = seconds // 60
+        results.append((stop_name, direction, minutes))
+
+    return results, None
+
+
+def t3_format_html(arrivals):
+    """Format arrivals as HTML."""
+    if not arrivals:
+        return "<h1>No buses found</h1>"
+
+    rows = []
+    for stop_name, direction, minutes in arrivals:
+        dir_short = direction[0].upper() if direction else "?"
+        rows.append(f"<tr><td>{minutes}m</td><td>{dir_short}</td><td>{stop_name}</td></tr>")
+
+    return f"""
+<title>K2 Bus Times</title>
+<style>
+body {{ font-family: monospace; background: #1a1a1a; color: #fff; padding: 1rem; margin: 0; }}
+.nav {{ text-align: center; margin-bottom: 1rem; }}
+.nav a {{ color: #4a9eff; text-decoration: none; }}
+h1 {{ font-size: 1.2rem; margin-bottom: 1rem; }}
+table {{ border-collapse: collapse; width: 100%; max-width: 600px; }}
+td {{ padding: 0.3rem 0.5rem; border-bottom: 1px solid #333; }}
+td:first-child {{ color: #4a9eff; text-align: right; width: 50px; }}
+td:nth-child(2) {{ width: 30px; text-align: center; }}
+</style>
+<div class="nav"><a href="contents">Home</a></div>
+<h1>K2 - {datetime.now().strftime('%H:%M')}</h1>
+<table>{''.join(rows)}</table>
+"""
 
 
 def lambda_handler(event, context):
@@ -1172,6 +1243,15 @@ def lambda_handler(event, context):
         });
         </script>
         '''
+
+    elif path == f'/{stage}/t3' or path == '/t3':
+        # Terse Transport Times - K2 bus arrivals
+        api_key = os.environ.get('TFL_API_KEY')
+        arrivals, error = t3_fetch_arrivals(api_key)
+        if error:
+            html += f"<h1>Error</h1><p>{error}</p>"
+        else:
+            html += t3_format_html(arrivals)
 
     else:
         html += open('cv.html', 'r').read()
