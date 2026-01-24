@@ -16,10 +16,12 @@ GARDENCAM_BUCKET = "gardencam-berrylands-eu-west-1"
 GARDENCAM_REGION = "eu-west-1"
 GARDENCAM_SECRET_NAME = "gardencam/password"
 GARDENCAM_PASSWORD = None
+TFL_SECRET_NAME = "tfl/api-key"
+TFL_API_KEY = None
 DYNAMODB_TABLE = "cv-access-logs"
 
 
-def get_secret(secret_name):
+def get_secret(secret_name, key='password'):
     """Retrieve a secret from AWS Secrets Manager."""
     if not BOTO3_AVAILABLE:
         print(f"WARNING: boto3 not available. Cannot retrieve secret: {secret_name}")
@@ -29,10 +31,9 @@ def get_secret(secret_name):
         client = boto3.client('secretsmanager', region_name=GARDENCAM_REGION)
         response = client.get_secret_value(SecretId=secret_name)
 
-        # Parse the secret (assuming it's stored as JSON with a 'password' key)
         if 'SecretString' in response:
             secret = json.loads(response['SecretString'])
-            return secret.get('password')
+            return secret.get(key)
 
         return None
     except Exception as e:
@@ -40,10 +41,16 @@ def get_secret(secret_name):
         return None
 
 
-# Initialize password from Secrets Manager on cold start
-GARDENCAM_PASSWORD = get_secret(GARDENCAM_SECRET_NAME)
+# Initialize secrets from Secrets Manager on cold start
+GARDENCAM_PASSWORD = get_secret(GARDENCAM_SECRET_NAME, 'password')
 if not GARDENCAM_PASSWORD:
     print(f"WARNING: Could not retrieve password from Secrets Manager ({GARDENCAM_SECRET_NAME}). Gardencam will be inaccessible.")
+
+TFL_API_KEY = get_secret(TFL_SECRET_NAME, 'api_key')
+if TFL_API_KEY:
+    print("TfL API key loaded from Secrets Manager")
+else:
+    print("WARNING: No TfL API key found. Using unauthenticated access (rate limited).")
 
 
 def check_basic_auth(event, required_password):
@@ -1280,7 +1287,7 @@ def lambda_handler(event, context):
 
     elif path == f'/{stage}/t3' or path == '/t3':
         # Terse Transport Times - K2 bus arrivals
-        api_key = os.environ.get('TFL_API_KEY')
+        api_key = TFL_API_KEY
         arrivals, error = t3_fetch_arrivals(api_key)
         if error:
             html += f"<h1>Error</h1><p>{error}</p>"
