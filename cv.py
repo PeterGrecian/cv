@@ -331,7 +331,7 @@ T3_BUSES_PER_DIRECTION = 2
 
 
 def t3_fetch_stop(stop_id, api_key=None):
-    """Fetch arrivals for a specific stop."""
+    """Fetch arrivals for a specific stop. Returns seconds."""
     url = f"{TFL_API_BASE}/StopPoint/{stop_id}/Arrivals"
     if api_key:
         url += f"?app_key={api_key}"
@@ -341,9 +341,23 @@ def t3_fetch_stop(stop_id, api_key=None):
         req.add_header('User-Agent', 't3-terse-transport-times/1.0')
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode())
-        return [a.get('timeToStation', 0) // 60 for a in data], None
+        return [a.get('timeToStation', 0) for a in data], None  # Return seconds
     except Exception as e:
         return [], str(e)
+
+
+def t3_seconds_to_quarter_minutes(seconds):
+    """Convert seconds to quarter-minute string (e.g., 5, 5¼, 5½, 5¾)."""
+    minutes = seconds // 60
+    remainder = seconds % 60
+    if remainder < 15:
+        return str(minutes)
+    elif remainder < 30:
+        return f"{minutes}¼"
+    elif remainder < 45:
+        return f"{minutes}½"
+    else:
+        return f"{minutes}¾"
 
 
 def t3_fetch_arrivals(api_key=None):
@@ -372,9 +386,10 @@ def t3_format_html(arrivals):
         if not times:
             return '<span class="time-box" style="color:#666">--</span>'
         boxes = []
-        for i, m in enumerate(times):
+        for i, secs in enumerate(times):
             cls = 'time-box next' if i == 0 else 'time-box'
-            boxes.append(f'<span class="{cls}">{m}</span>')
+            display = t3_seconds_to_quarter_minutes(secs)
+            boxes.append(f'<span class="{cls}">{display}</span>')
         return ' '.join(boxes)
 
     return f"""
@@ -423,11 +438,11 @@ def t3_format_json(arrivals):
         "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         "inbound": {
             "destination": "Kingston",
-            "minutes": arrivals.get('inbound', [])
+            "seconds": arrivals.get('inbound', [])
         },
         "outbound": {
             "destination": "Hook",
-            "minutes": arrivals.get('outbound', [])
+            "seconds": arrivals.get('outbound', [])
         }
     })
 
