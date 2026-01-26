@@ -415,6 +415,23 @@ setInterval(() => {{
 """
 
 
+def t3_format_json(arrivals):
+    """Format Parklands arrivals as JSON for API consumers."""
+    return json.dumps({
+        "stop": "Parklands",
+        "route": "K2",
+        "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "inbound": {
+            "destination": "Kingston",
+            "minutes": arrivals.get('inbound', [])
+        },
+        "outbound": {
+            "destination": "Hook",
+            "minutes": arrivals.get('outbound', [])
+        }
+    })
+
+
 def lambda_handler(event, context):
     import time
     start_time = time.time()
@@ -1280,6 +1297,35 @@ def lambda_handler(event, context):
         # Terse Transport Times - K2 bus arrivals
         api_key = TFL_API_KEY
         arrivals, error = t3_fetch_arrivals(api_key)
+
+        # Check if JSON is requested
+        headers = event.get('headers', {}) or {}
+        accept = headers.get('Accept', headers.get('accept', 'text/html'))
+
+        if 'application/json' in accept:
+            # Return JSON for API consumers (e.g., Android app)
+            duration_ms = (time.time() - start_time) * 1000
+            log_execution_metrics(context, duration_ms, path)
+
+            if error:
+                return {
+                    'statusCode': 500,
+                    'body': json.dumps({'error': error}),
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    }
+                }
+            return {
+                'statusCode': 200,
+                'body': t3_format_json(arrivals),
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                }
+            }
+
+        # Return HTML for browsers
         if error:
             html += f"<h1>Error</h1><p>{error}</p>"
         else:
