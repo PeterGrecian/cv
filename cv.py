@@ -325,9 +325,28 @@ def get_lambda_execution_stats(limit=1000):
 # ============================================================================
 
 TFL_API_BASE = "https://api.tfl.gov.uk"
-T3_STOP_INBOUND = "490010781S"   # Parklands southbound (towards Kingston)
-T3_STOP_OUTBOUND = "490010781N"  # Parklands northbound (towards Hook)
 T3_BUSES_PER_DIRECTION = 2
+
+# Stop configurations for K2 bus
+T3_STOPS = {
+    'parklands': {
+        'name': 'Parklands',
+        'inbound': '490010781S',   # Parklands southbound (towards Kingston)
+        'outbound': '490010781N',  # Parklands northbound (towards Hook)
+        'inbound_dest': 'Kingston',
+        'outbound_dest': 'Hook'
+    },
+    'surbiton': {
+        'name': 'Surbiton Station',
+        'outbound': '490015165B',  # Surbiton Station towards Hook
+        'outbound_dest': 'Hook'
+        # No inbound - only show outbound at Surbiton
+    }
+}
+
+# Legacy constants for backwards compatibility
+T3_STOP_INBOUND = T3_STOPS['parklands']['inbound']
+T3_STOP_OUTBOUND = T3_STOPS['parklands']['outbound']
 
 
 def t3_fetch_stop(stop_id, api_key=None):
@@ -360,21 +379,35 @@ def t3_seconds_to_quarter_minutes(seconds):
         return f"{minutes}¾"
 
 
-def t3_fetch_arrivals(api_key=None):
-    """Fetch bus arrivals for Parklands stop from TfL API."""
-    inbound, err1 = t3_fetch_stop(T3_STOP_INBOUND, api_key)
-    outbound, err2 = t3_fetch_stop(T3_STOP_OUTBOUND, api_key)
+def t3_fetch_arrivals(api_key=None, stop='parklands'):
+    """Fetch bus arrivals for specified stop from TfL API."""
+    stop_config = T3_STOPS.get(stop, T3_STOPS['parklands'])
 
-    if err1 and err2:
-        return {}, f"{err1}; {err2}"
+    result = {}
+    errors = []
 
-    inbound.sort()
-    outbound.sort()
+    # Fetch inbound if available for this stop
+    if 'inbound' in stop_config:
+        inbound, err = t3_fetch_stop(stop_config['inbound'], api_key)
+        if err:
+            errors.append(err)
+        else:
+            inbound.sort()
+            result['inbound'] = inbound[:T3_BUSES_PER_DIRECTION]
 
-    return {
-        'inbound': inbound[:T3_BUSES_PER_DIRECTION],
-        'outbound': outbound[:T3_BUSES_PER_DIRECTION]
-    }, None
+    # Fetch outbound if available for this stop
+    if 'outbound' in stop_config:
+        outbound, err = t3_fetch_stop(stop_config['outbound'], api_key)
+        if err:
+            errors.append(err)
+        else:
+            outbound.sort()
+            result['outbound'] = outbound[:T3_BUSES_PER_DIRECTION]
+
+    if not result and errors:
+        return {}, '; '.join(errors)
+
+    return result, None
 
 
 def t3_format_html(arrivals):
@@ -430,21 +463,31 @@ setInterval(() => {{
 """
 
 
-def t3_format_json(arrivals):
-    """Format Parklands arrivals as JSON for API consumers."""
-    return json.dumps({
-        "stop": "Parklands",
+def t3_format_json(arrivals, stop='parklands'):
+    """Format arrivals as JSON for API consumers."""
+    stop_config = T3_STOPS.get(stop, T3_STOPS['parklands'])
+
+    result = {
+        "stop": stop_config['name'],
         "route": "K2",
         "timestamp": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        "inbound": {
-            "destination": "Kingston",
+    }
+
+    # Add inbound if available for this stop
+    if 'inbound' in stop_config:
+        result["inbound"] = {
+            "destination": stop_config['inbound_dest'],
             "seconds": arrivals.get('inbound', [])
-        },
-        "outbound": {
-            "destination": "Hook",
+        }
+
+    # Add outbound if available for this stop
+    if 'outbound' in stop_config:
+        result["outbound"] = {
+            "destination": stop_config['outbound_dest'],
             "seconds": arrivals.get('outbound', [])
         }
-    })
+
+    return json.dumps(result)
 
 
 def lambda_handler(event, context):
@@ -455,8 +498,11 @@ def lambda_handler(event, context):
     log_connection(event, context)
 
     html = ""
-    favicon=open("favicon.png64", "r").read()
-    fav = f'<link rel="icon" type="image/png" href="data:image/png;base64,{favicon}">'
+    try:
+        favicon = open("favicon.png64", "r").read()
+        fav = f'<link rel="icon" type="image/png" href="data:image/png;base64,{favicon}">'
+    except FileNotFoundError:
+        fav = ""
     #fav += '\n<head><link rel="stylesheet" href="styles.css"></head>'
     path = event['path']
     stage = event['requestContext']['stage']
@@ -1311,7 +1357,14 @@ def lambda_handler(event, context):
     elif path == f'/{stage}/t3' or path == '/t3':
         # Terse Transport Times - K2 bus arrivals
         api_key = TFL_API_KEY
-        arrivals, error = t3_fetch_arrivals(api_key)
+
+        # Get stop parameter (default to parklands)
+        query_params = event.get('queryStringParameters', {}) or {}
+        stop = query_params.get('stop', 'parklands').lower()
+        if stop not in T3_STOPS:
+            stop = 'parklands'
+
+        arrivals, error = t3_fetch_arrivals(api_key, stop)
 
         # Check if JSON is requested
         headers = event.get('headers', {}) or {}
@@ -1333,7 +1386,7 @@ def lambda_handler(event, context):
                 }
             return {
                 'statusCode': 200,
-                'body': t3_format_json(arrivals),
+                'body': t3_format_json(arrivals, stop),
                 'headers': {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
