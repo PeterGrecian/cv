@@ -174,19 +174,27 @@ def get_all_gardencam_images():
         return []
     s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
 
-    # List all objects
-    response = s3.list_objects_v2(Bucket=GARDENCAM_BUCKET)
-    if "Contents" not in response:
+    # List objects with garden_ prefix (excludes thumbnails and averaged images)
+    # Use paginator to handle >1000 objects
+    paginator = s3.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=GARDENCAM_BUCKET, Prefix='garden_')
+
+    all_objects = []
+    for page in pages:
+        if "Contents" in page:
+            all_objects.extend(page["Contents"])
+
+    if not all_objects:
         return []
 
     # Sort by Key (filename contains timestamp), newest first
-    objects = sorted(response["Contents"], key=lambda x: x["Key"], reverse=True)
+    objects = sorted(all_objects, key=lambda x: x["Key"], reverse=True)
     images = []
 
     for obj in objects:
         key = obj["Key"]
-        # Only include main garden images (not thumbnails or averaged images)
-        if not key.startswith('garden_') or not key.endswith('.jpg'):
+        # Only include .jpg files
+        if not key.endswith('.jpg'):
             continue
 
         timestamp = parse_timestamp_from_key(key) or obj["LastModified"].strftime("%Y-%m-%d %H:%M:%S")
@@ -670,6 +678,7 @@ def lambda_handler(event, context):
             <a href="../../contents">Home</a>
             <a href="../gardencam">Latest</a>
             <a href="gallery">Gallery</a>
+            <a href="s3-stats">Storage</a>
         </div>
         <h1>Garden Camera Statistics</h1>
 
@@ -1044,6 +1053,222 @@ def lambda_handler(event, context):
 
                 html += '</div>'
 
+    elif path.startswith(f'/{stage}/gardencam/s3-stats') or path.startswith('/gardencam/s3-stats'):
+        # S3 storage statistics page - reads from cached JSON
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        # Read cached summary from S3 (updated hourly by gardencam-storage-summary Lambda)
+        s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+        cache_key = "stats/s3-storage-summary.json"
+        cache_error = None
+
+        try:
+            response = s3.get_object(Bucket=GARDENCAM_BUCKET, Key=cache_key)
+            summary = json.loads(response['Body'].read().decode('utf-8'))
+        except Exception as e:
+            cache_error = str(e)
+            summary = None
+
+        if summary:
+            # Extract data from cached summary
+            total_files = summary.get('total_count', 0)
+            total_size_gb = summary.get('total_size_gb', 0)
+            costs = summary.get('costs', {})
+            storage_cost = costs.get('monthly_storage_cost_usd', 0)
+            put_cost = costs.get('monthly_put_cost_usd', 0)
+            get_cost = costs.get('monthly_get_cost_usd', 0)
+            total_monthly = costs.get('total_monthly_cost_usd', storage_cost)
+            yearly_total = costs.get('yearly_total_cost_usd', total_monthly * 12)
+            weekly_stats = summary.get('weekly_stats', {})
+            generated_at = summary.get('generated_at', 'Unknown')
+
+            # Sort weeks
+            sorted_weeks = sorted(weekly_stats.items(), reverse=True)
+
+            # Prepare chart data (last 12 weeks, oldest first)
+            chart_weeks = []
+            chart_counts = []
+            chart_sizes = []
+
+            for week, data in reversed(sorted_weeks[:12]):
+                chart_weeks.append(week)
+                chart_counts.append(data['count'])
+                chart_sizes.append(data.get('size_gb', 0))
+
+            html += f'''
+        <title>S3 Storage Statistics</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+            .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+            .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+            .nav a:hover {{ background: #3a3a3a; }}
+            h1 {{ text-align: center; margin-bottom: 2rem; }}
+            .chart-container {{ max-width: 1400px; margin: 0 auto 3rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
+            .chart-title {{ font-size: 1.2rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
+            canvas {{ max-height: 400px; }}
+            .stats-summary {{ max-width: 1400px; margin: 0 auto 2rem auto; padding: 1rem; background: #2a2a2a; border-radius: 8px; }}
+            .stats-summary h2 {{ margin-top: 0; color: #aaa; }}
+            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }}
+            .stat-box {{ background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }}
+            .stat-value {{ font-size: 2rem; font-weight: bold; color: #4a9eff; }}
+            .stat-label {{ color: #888; margin-top: 0.5rem; }}
+            .weekly-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
+            .weekly-table th, .weekly-table td {{ padding: 0.5rem; text-align: left; border-bottom: 1px solid #3a3a3a; }}
+            .weekly-table th {{ color: #aaa; background: #1a1a1a; }}
+            .weekly-table td {{ font-family: monospace; }}
+        </style>
+        <div class="nav">
+            <a href="../../contents">Home</a>
+            <a href="../gardencam">Latest</a>
+            <a href="gallery">Gallery</a>
+            <a href="stats">Capture Stats</a>
+        </div>
+        <h1>S3 Storage Statistics</h1>
+
+        <div class="stats-summary">
+            <h2>Total Storage</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value">{total_files:,}</div>
+                    <div class="stat-label">Total Files</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{total_size_gb:.2f} GB</div>
+                    <div class="stat-label">Total Size</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">${total_monthly:.3f}</div>
+                    <div class="stat-label">Monthly Total</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">${yearly_total:.2f}</div>
+                    <div class="stat-label">Yearly Total</div>
+                </div>
+            </div>
+            <div style="margin-top: 1rem; color: #666; font-size: 0.85rem;">
+                Breakdown: Storage ${storage_cost:.4f} + PUT requests ${put_cost:.4f} + GET requests ${get_cost:.4f}
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Files per Week</div>
+            <canvas id="countChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Storage Size per Week (GB)</div>
+            <canvas id="sizeChart"></canvas>
+        </div>
+
+        <div class="stats-summary">
+            <h2>Weekly Breakdown</h2>
+            <table class="weekly-table">
+                <thead>
+                    <tr>
+                        <th>Week</th>
+                        <th>Files</th>
+                        <th>Size</th>
+                        <th>Weekly Cost</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+            for week, data in sorted_weeks:
+                size_gb = data.get('size_gb', 0)
+                size_bytes = data.get('size', 0)
+                size_mb = size_bytes / 1048576 if size_bytes else size_gb * 1024
+                weekly_cost = data.get('weekly_cost_usd', 0)
+                size_display = f"{size_mb:.1f} MB" if size_gb < 1 else f"{size_gb:.2f} GB"
+                html += f'''
+                    <tr>
+                        <td>{week}</td>
+                        <td>{data['count']:,}</td>
+                        <td>{size_display}</td>
+                        <td>${weekly_cost:.4f}</td>
+                    </tr>
+                '''
+
+            html += f'''
+                </tbody>
+            </table>
+            <p style="color: #666; font-size: 0.85rem; margin-top: 1rem;">Last updated: {generated_at}</p>
+        </div>
+
+        <script>
+        const chartWeeks = {json.dumps(chart_weeks)};
+        const chartCounts = {json.dumps(chart_counts)};
+        const chartSizes = {json.dumps(chart_sizes)};
+
+        const chartOptions = {{
+            responsive: true,
+            maintainAspectRatio: true,
+            scales: {{
+                x: {{ ticks: {{ color: '#888' }}, grid: {{ color: '#333' }} }},
+                y: {{ ticks: {{ color: '#888' }}, grid: {{ color: '#333' }} }}
+            }},
+            plugins: {{ legend: {{ labels: {{ color: '#aaa' }} }} }}
+        }};
+
+        new Chart(document.getElementById('countChart'), {{
+            type: 'bar',
+            data: {{
+                labels: chartWeeks,
+                datasets: [{{
+                    label: 'Files',
+                    data: chartCounts,
+                    backgroundColor: '#4a9eff'
+                }}]
+            }},
+            options: chartOptions
+        }});
+
+        new Chart(document.getElementById('sizeChart'), {{
+            type: 'bar',
+            data: {{
+                labels: chartWeeks,
+                datasets: [{{
+                    label: 'Size (GB)',
+                    data: chartSizes,
+                    backgroundColor: '#10b981'
+                }}]
+            }},
+            options: chartOptions
+        }});
+        </script>
+            '''
+        else:
+            # Cache not available - show error
+            html += f'''
+            <title>S3 Storage Statistics</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+                .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+                .error {{ max-width: 800px; margin: 2rem auto; padding: 2rem; background: #2a2a2a; border-radius: 8px; text-align: center; }}
+                .error h1 {{ color: #ef4444; }}
+            </style>
+            <div class="nav">
+                <a href="../../contents">Home</a>
+                <a href="../gardencam">Latest</a>
+            </div>
+            <div class="error">
+                <h1>Cache Not Available</h1>
+                <p>The storage summary cache has not been generated yet.</p>
+                <p style="color: #888;">Error: {cache_error}</p>
+                <p style="color: #666; font-size: 0.9rem;">The cache is updated hourly by a scheduled Lambda function.</p>
+            </div>
+            '''
+
     elif path == f'/{stage}/gardencam' or path == '/gardencam':
         # Check authentication
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -1088,7 +1313,8 @@ def lambda_handler(event, context):
             </div>
             <h1>Garden Camera</h1>
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
-            <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">View Statistics</a>
+            <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">Capture Stats</a>
+            <a href="gardencam/s3-stats" class="gallery-link" style="margin-left: 0.5rem;">Storage Stats</a>
             <button id="captureBtn" class="gallery-link" style="margin-left: 0.5rem; cursor: pointer;">📷 Capture Now</button>
             <div id="captureStatus" style="margin-top: 0.5rem; font-size: 0.9rem;"></div>
             <script>
