@@ -1,0 +1,1 @@
+better name.  this is my website publishing core.  better docs about how it works and facilitates projects.  invocation stats
