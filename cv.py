@@ -20,6 +20,11 @@ TFL_SECRET_NAME = "tfl/api-key"
 TFL_API_KEY = None
 DYNAMODB_TABLE = "cv-access-logs"
 
+# Memspeed configuration - uses same bucket with memspeed/ prefix
+MEMSPEED_PREFIX = "memspeed/"
+MEMSPEED_RESULTS_PREFIX = "memspeed/results/"
+MEMSPEED_DOWNLOADS_PREFIX = "memspeed/downloads/"
+
 
 def get_secret(secret_name, key='password'):
     """Retrieve a secret from AWS Secrets Manager."""
@@ -496,6 +501,410 @@ def t3_format_json(arrivals, stop='parklands'):
         }
 
     return json.dumps(result)
+
+
+# ============================================================================
+# Memspeed - Memory bandwidth benchmark visualization
+# ============================================================================
+
+def get_memspeed_results():
+    """Get all memspeed benchmark results from S3."""
+    if not BOTO3_AVAILABLE:
+        return []
+
+    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+    results = []
+
+    try:
+        paginator = s3.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=GARDENCAM_BUCKET, Prefix=MEMSPEED_RESULTS_PREFIX):
+            if "Contents" not in page:
+                continue
+            for obj in page["Contents"]:
+                key = obj["Key"]
+                if not key.endswith('.json'):
+                    continue
+                try:
+                    response = s3.get_object(Bucket=GARDENCAM_BUCKET, Key=key)
+                    data = json.loads(response['Body'].read().decode('utf-8'))
+                    data['_key'] = key
+                    results.append(data)
+                except Exception as e:
+                    print(f"Error reading {key}: {e}")
+    except Exception as e:
+        print(f"Error listing memspeed results: {e}")
+
+    return results
+
+
+def get_memspeed_downloads():
+    """Get list of available memspeed downloads from S3."""
+    if not BOTO3_AVAILABLE:
+        return []
+
+    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+    downloads = []
+
+    try:
+        paginator = s3.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=GARDENCAM_BUCKET, Prefix=MEMSPEED_DOWNLOADS_PREFIX):
+            if "Contents" not in page:
+                continue
+            for obj in page["Contents"]:
+                key = obj["Key"]
+                filename = key.replace(MEMSPEED_DOWNLOADS_PREFIX, '')
+                if not filename:
+                    continue
+                downloads.append({
+                    'key': key,
+                    'filename': filename,
+                    'size': obj['Size'],
+                    'last_modified': obj['LastModified'].isoformat()
+                })
+    except Exception as e:
+        print(f"Error listing memspeed downloads: {e}")
+
+    return downloads
+
+
+def get_memspeed_download_url(key, expires_in=3600):
+    """Generate presigned URL for a memspeed download."""
+    if not BOTO3_AVAILABLE:
+        return None
+    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+    return s3.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': GARDENCAM_BUCKET, 'Key': key},
+        ExpiresIn=expires_in
+    )
+
+
+def save_memspeed_result(data):
+    """Save a memspeed benchmark result to S3."""
+    if not BOTO3_AVAILABLE:
+        return False, "S3 not available"
+
+    # Validate required fields
+    required = ['machine', 'data']
+    for field in required:
+        if field not in data:
+            return False, f"Missing required field: {field}"
+
+    # Add timestamp if not present
+    if 'timestamp' not in data:
+        data['timestamp'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    # Generate key from machine name and timestamp
+    machine = data['machine'].replace(' ', '_').replace('/', '_')
+    ts = data['timestamp'].replace(':', '-').replace('T', '_').split('.')[0]
+    key = f"{MEMSPEED_RESULTS_PREFIX}{machine}_{ts}.json"
+
+    try:
+        s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+        s3.put_object(
+            Bucket=GARDENCAM_BUCKET,
+            Key=key,
+            Body=json.dumps(data, indent=2),
+            ContentType='application/json'
+        )
+        return True, key
+    except Exception as e:
+        return False, str(e)
+
+
+def render_memspeed_page(results, downloads):
+    """Render the memspeed visualization page."""
+    # Assign colors to machines
+    colors = [
+        '#4a9eff', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
+        '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+    ]
+
+    # Prepare datasets for Chart.js
+    datasets_js = []
+    for i, result in enumerate(results):
+        machine = result.get('machine', 'Unknown')
+        color = colors[i % len(colors)]
+        data_points = result.get('data', [])
+
+        # Format data for scatter plot
+        points = [{'x': p['size'], 'y': p['speed']} for p in data_points]
+
+        cpu = result.get('cpu', '')
+        ram = result.get('ram', '')
+        label = machine
+        if cpu:
+            label += f" ({cpu})"
+
+        datasets_js.append({
+            'label': label,
+            'data': points,
+            'borderColor': color,
+            'backgroundColor': color,
+            'showLine': True,
+            'tension': 0.1,
+            'pointRadius': 2,
+            'borderWidth': 2
+        })
+
+    # Build downloads HTML
+    downloads_html = ''
+    if downloads:
+        downloads_html = '<h2>Downloads</h2><div class="downloads-grid">'
+        for dl in downloads:
+            size_kb = dl['size'] / 1024
+            if size_kb > 1024:
+                size_str = f"{size_kb/1024:.1f} MB"
+            else:
+                size_str = f"{size_kb:.1f} KB"
+            downloads_html += f'''
+            <a href="memspeed/download?file={dl['filename']}" class="download-item">
+                <span class="filename">{dl['filename']}</span>
+                <span class="filesize">{size_str}</span>
+            </a>
+            '''
+        downloads_html += '</div>'
+
+    # Build results table
+    results_table = ''
+    if results:
+        results_table = '''
+        <h2>Benchmark Results</h2>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Machine</th>
+                    <th>CPU</th>
+                    <th>Cache (L1 / L2 / L3)</th>
+                    <th>RAM</th>
+                    <th>OS</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+        '''
+        for result in results:
+            cache = result.get('cache', {})
+            if cache:
+                cache_str = f"{cache.get('L1', '-')} / {cache.get('L2', '-')} / {cache.get('L3', '-')}"
+            else:
+                cache_str = '-'
+            results_table += f'''
+                <tr>
+                    <td>{result.get('machine', 'Unknown')}</td>
+                    <td>{result.get('cpu', '-')}</td>
+                    <td>{cache_str}</td>
+                    <td>{result.get('ram', '-')}</td>
+                    <td>{result.get('os', '-')}</td>
+                    <td>{result.get('timestamp', '-')}</td>
+                </tr>
+            '''
+        results_table += '</tbody></table>'
+
+    return f'''
+    <title>Memory Bandwidth Benchmark</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+        .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+        .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+        .nav a:hover {{ background: #3a3a3a; }}
+        h1 {{ text-align: center; margin-bottom: 2rem; }}
+        h2 {{ color: #aaa; margin-top: 2rem; }}
+        .chart-container {{ max-width: 1400px; margin: 0 auto 2rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
+        .chart-title {{ font-size: 1.2rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
+        canvas {{ max-height: 500px; }}
+        .upload-section {{ max-width: 600px; margin: 2rem auto; padding: 1.5rem; background: #2a2a2a; border-radius: 8px; }}
+        .upload-section h2 {{ margin-top: 0; }}
+        .upload-form {{ display: flex; flex-direction: column; gap: 1rem; }}
+        .upload-form input[type="file"] {{ padding: 0.5rem; background: #1a1a1a; border: 1px solid #444; border-radius: 4px; color: #fff; }}
+        .upload-form button {{ padding: 0.75rem 1.5rem; background: #4a9eff; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }}
+        .upload-form button:hover {{ background: #3a8eef; }}
+        .upload-form button:disabled {{ background: #666; cursor: not-allowed; }}
+        #uploadStatus {{ margin-top: 0.5rem; font-size: 0.9rem; }}
+        .downloads-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; margin-top: 1rem; }}
+        .download-item {{ display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: #1a1a1a; border-radius: 6px; text-decoration: none; color: #4a9eff; transition: background 0.3s; }}
+        .download-item:hover {{ background: #333; }}
+        .filename {{ font-family: monospace; }}
+        .filesize {{ color: #888; font-size: 0.9rem; }}
+        .results-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
+        .results-table th, .results-table td {{ padding: 0.75rem; text-align: left; border-bottom: 1px solid #3a3a3a; }}
+        .results-table th {{ color: #aaa; background: #1a1a1a; }}
+        .results-table td {{ font-family: monospace; font-size: 0.9rem; }}
+        .no-data {{ text-align: center; color: #888; padding: 2rem; }}
+        .about-section {{ max-width: 900px; margin: 0 auto 2rem auto; padding: 1.5rem; background: #2a2a2a; border-radius: 8px; line-height: 1.6; }}
+        .about-section h2 {{ margin-top: 0; color: #aaa; }}
+        .about-section p {{ color: #ccc; margin: 1rem 0; }}
+        .about-section code {{ background: #1a1a1a; padding: 0.2rem 0.5rem; border-radius: 4px; font-family: monospace; }}
+        .about-section pre {{ background: #1a1a1a; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.9rem; }}
+        .about-section ul {{ color: #ccc; margin: 1rem 0; padding-left: 1.5rem; }}
+        .about-section li {{ margin: 0.5rem 0; }}
+    </style>
+    <div class="nav">
+        <a href="contents">Home</a>
+        <a href="memspeed/data">JSON API</a>
+    </div>
+    <h1>Memory Bandwidth Benchmark</h1>
+
+    <div class="about-section">
+        <h2>About</h2>
+        <p>
+            This tool measures memory bandwidth by writing to buffers of increasing size.
+            The resulting curve reveals CPU cache hierarchy: L1 cache (fastest), L2, L3, and main RAM (slowest).
+            Sharp drops in speed indicate transitions between cache levels.
+        </p>
+        <p>
+            The chart uses a log-log scale to clearly show performance across buffer sizes from 1KB to 1GB.
+            Compare results across different machines to see how CPU architecture and RAM speed affect performance.
+        </p>
+
+        <h2>How to Run</h2>
+        <p>Download the source or pre-built binary, run the benchmark, and upload your results:</p>
+        <pre># Option 1: Download and compile from source
+tar -xzf memspeed-src.tar.gz
+gcc ms.c -o ms
+
+# Option 2: Use pre-built binary (Linux x86_64)
+chmod +x ms-linux-x86_64
+./ms-linux-x86_64
+
+# Run benchmark and generate results
+./ms > all.out
+grep -v Reps all.out > data.csv
+./export_json.py > result.json</pre>
+        <p>Then upload <code>result.json</code> using the form below, or via curl:</p>
+        <pre>curl -u ":PASSWORD" -X POST -H "Content-Type: application/json" \\
+  -d @result.json https://cv.petergrecian.co.uk/memspeed/upload</pre>
+    </div>
+
+    <div class="chart-container">
+        <div class="chart-title">Memory Read Speed vs Buffer Size (Log-Log Scale)</div>
+        <canvas id="memspeedChart"></canvas>
+    </div>
+
+    {downloads_html}
+
+    {results_table if results else '<p class="no-data">No benchmark results yet. Upload your results below.</p>'}
+
+    <div class="upload-section">
+        <h2>Upload Results</h2>
+        <form class="upload-form" id="uploadForm">
+            <input type="file" id="jsonFile" accept=".json" required>
+            <button type="submit" id="uploadBtn">Upload Benchmark</button>
+            <div id="uploadStatus"></div>
+        </form>
+        <p style="color: #888; font-size: 0.85rem; margin-top: 1rem;">
+            Generate JSON with: <code style="background: #1a1a1a; padding: 0.2rem 0.4rem; border-radius: 3px;">./export_json.py &gt; result.json</code>
+        </p>
+    </div>
+
+    <script>
+    const datasets = {json.dumps(datasets_js)};
+
+    if (datasets.length > 0) {{
+        new Chart(document.getElementById('memspeedChart'), {{
+            type: 'scatter',
+            data: {{ datasets: datasets }},
+            options: {{
+                responsive: true,
+                maintainAspectRatio: true,
+                scales: {{
+                    x: {{
+                        type: 'logarithmic',
+                        title: {{ display: true, text: 'Buffer Size (bytes)', color: '#aaa' }},
+                        ticks: {{
+                            color: '#888',
+                            callback: function(value) {{
+                                if (value >= 1e9) return (value/1e9) + ' GB';
+                                if (value >= 1e6) return (value/1e6) + ' MB';
+                                if (value >= 1e3) return (value/1e3) + ' KB';
+                                return value + ' B';
+                            }}
+                        }},
+                        grid: {{ color: '#333' }}
+                    }},
+                    y: {{
+                        type: 'logarithmic',
+                        title: {{ display: true, text: 'Speed (bytes/sec)', color: '#aaa' }},
+                        ticks: {{
+                            color: '#888',
+                            callback: function(value) {{
+                                if (value >= 1e9) return (value/1e9) + ' GB/s';
+                                if (value >= 1e6) return (value/1e6) + ' MB/s';
+                                if (value >= 1e3) return (value/1e3) + ' KB/s';
+                                return value + ' B/s';
+                            }}
+                        }},
+                        grid: {{ color: '#333' }}
+                    }}
+                }},
+                plugins: {{
+                    legend: {{
+                        labels: {{ color: '#aaa' }},
+                        position: 'top'
+                    }},
+                    tooltip: {{
+                        callbacks: {{
+                            label: function(context) {{
+                                const size = context.parsed.x;
+                                const speed = context.parsed.y;
+                                let sizeStr = size >= 1e6 ? (size/1e6).toFixed(1) + ' MB' : (size/1e3).toFixed(1) + ' KB';
+                                let speedStr = (speed/1e9).toFixed(2) + ' GB/s';
+                                return context.dataset.label + ': ' + sizeStr + ' @ ' + speedStr;
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+        }});
+    }}
+
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {{
+        e.preventDefault();
+        const fileInput = document.getElementById('jsonFile');
+        const status = document.getElementById('uploadStatus');
+        const btn = document.getElementById('uploadBtn');
+
+        if (!fileInput.files[0]) {{
+            status.textContent = 'Please select a file';
+            status.style.color = '#ef4444';
+            return;
+        }}
+
+        btn.disabled = true;
+        btn.textContent = 'Uploading...';
+        status.textContent = '';
+
+        try {{
+            const text = await fileInput.files[0].text();
+            const data = JSON.parse(text);
+
+            const response = await fetch('memspeed/upload', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify(data)
+            }});
+
+            const result = await response.json();
+
+            if (response.ok) {{
+                status.textContent = result.message || 'Upload successful!';
+                status.style.color = '#10b981';
+                setTimeout(() => location.reload(), 1500);
+            }} else {{
+                status.textContent = result.error || 'Upload failed';
+                status.style.color = '#ef4444';
+            }}
+        }} catch (err) {{
+            status.textContent = 'Error: ' + err.message;
+            status.style.color = '#ef4444';
+        }}
+
+        btn.disabled = false;
+        btn.textContent = 'Upload Benchmark';
+    }});
+    </script>
+    '''
 
 
 def lambda_handler(event, context):
@@ -1365,18 +1774,23 @@ def lambda_handler(event, context):
 
     elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
         # Lambda execution statistics page
-        stats = get_lambda_execution_stats(limit=1000)
+        stats = get_lambda_execution_stats(limit=5000)
 
         # Aggregate data by day
         from collections import defaultdict
         from decimal import Decimal
+        from datetime import datetime, timedelta
 
         daily_stats = defaultdict(lambda: {
             'count': 0,
             'total_duration_ms': Decimal('0'),
             'total_cost_usd': Decimal('0'),
-            'paths': defaultdict(int)
+            'paths': defaultdict(int),
+            'gb_seconds': Decimal('0')
         })
+
+        # Track all unique paths for the stacked chart
+        all_paths = set()
 
         for item in stats:
             ts = item.get('timestamp', '')
@@ -1387,6 +1801,12 @@ def lambda_handler(event, context):
                 daily_stats[date]['total_cost_usd'] += Decimal(str(item.get('estimated_cost_usd', 0)))
                 path_item = item.get('path', 'unknown')
                 daily_stats[date]['paths'][path_item] += 1
+                all_paths.add(path_item)
+
+                # Calculate GB-seconds for free tier tracking
+                memory_gb = Decimal(str(item.get('memory_limit_mb', 512))) / Decimal('1024')
+                duration_seconds = Decimal(str(item.get('duration_ms', 0))) / Decimal('1000')
+                daily_stats[date]['gb_seconds'] += memory_gb * duration_seconds
 
         # Sort by date
         sorted_dates = sorted(daily_stats.keys(), reverse=True)
@@ -1396,6 +1816,7 @@ def lambda_handler(event, context):
         chart_counts = []
         chart_durations = []
         chart_costs = []
+        chart_path_data = defaultdict(list)
 
         for date in reversed(sorted_dates[-30:]):  # Last 30 days
             chart_dates.append(date)
@@ -1403,9 +1824,67 @@ def lambda_handler(event, context):
             chart_durations.append(float(daily_stats[date]['total_duration_ms']))
             chart_costs.append(float(daily_stats[date]['total_cost_usd']))
 
+            # Collect path counts for stacked chart
+            for path_name in all_paths:
+                chart_path_data[path_name].append(daily_stats[date]['paths'].get(path_name, 0))
+
         total_executions = sum(d['count'] for d in daily_stats.values())
         total_cost = sum(d['total_cost_usd'] for d in daily_stats.values())
         total_duration = sum(d['total_duration_ms'] for d in daily_stats.values())
+        total_gb_seconds = sum(d['gb_seconds'] for d in daily_stats.values())
+
+        # Calculate current month stats for free tier tracking
+        today = datetime.utcnow()
+        month_start = today.replace(day=1).strftime('%Y-%m-%d')
+        current_month_stats = {
+            'requests': 0,
+            'gb_seconds': Decimal('0'),
+            'cost': Decimal('0')
+        }
+
+        for date_str, data in daily_stats.items():
+            if date_str >= month_start:
+                current_month_stats['requests'] += data['count']
+                current_month_stats['gb_seconds'] += data['gb_seconds']
+                current_month_stats['cost'] += data['total_cost_usd']
+
+        # AWS Lambda Free Tier limits (monthly)
+        FREE_TIER_REQUESTS = 1_000_000
+        FREE_TIER_GB_SECONDS = 400_000
+
+        # Calculate usage percentages
+        request_usage_pct = (current_month_stats['requests'] / FREE_TIER_REQUESTS) * 100
+        gb_seconds_usage_pct = (float(current_month_stats['gb_seconds']) / FREE_TIER_GB_SECONDS) * 100
+
+        # Calculate costs if free tier was exceeded
+        excess_requests = max(0, current_month_stats['requests'] - FREE_TIER_REQUESTS)
+        excess_gb_seconds = max(0, float(current_month_stats['gb_seconds']) - FREE_TIER_GB_SECONDS)
+
+        excess_request_cost = (excess_requests / 1_000_000) * 0.20
+        excess_compute_cost = excess_gb_seconds * 0.0000166667
+        total_excess_cost = excess_request_cost + excess_compute_cost
+
+        # Monthly projection (days elapsed in month)
+        days_in_month = (today.replace(month=today.month % 12 + 1, day=1) if today.month < 12
+                         else today.replace(year=today.year + 1, month=1, day=1)) - today.replace(day=1)
+        days_elapsed = today.day
+        projection_multiplier = days_in_month.days / days_elapsed if days_elapsed > 0 else 1
+
+        projected_requests = int(current_month_stats['requests'] * projection_multiplier)
+        projected_gb_seconds = float(current_month_stats['gb_seconds']) * projection_multiplier
+        projected_cost = float(current_month_stats['cost']) * projection_multiplier
+
+        # Calculate top paths by total count
+        path_totals = defaultdict(int)
+        for data in daily_stats.values():
+            for path_name, count in data['paths'].items():
+                path_totals[path_name] += count
+
+        top_paths = sorted(path_totals.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        # Determine free tier status color
+        free_tier_status = 'good' if request_usage_pct < 50 else ('warning' if request_usage_pct < 80 else 'danger')
+        status_colors = {'good': '#32cd32', 'warning': '#ffa500', 'danger': '#ff4444'}
 
         html += f'''
         <title>Lambda Execution Statistics</title>
@@ -1428,6 +1907,15 @@ def lambda_handler(event, context):
             .daily-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
             .daily-table th, .daily-table td {{ padding: 0.5rem; text-align: left; border-bottom: 1px solid #3a3a3a; }}
             .daily-table th {{ color: #aaa; background: #1a1a1a; }}
+            .free-tier-box {{ background: #1a1a1a; padding: 1.5rem; border-radius: 6px; border-left: 4px solid {status_colors[free_tier_status]}; }}
+            .progress-bar {{ background: #3a3a3a; height: 20px; border-radius: 10px; overflow: hidden; margin: 0.5rem 0; }}
+            .progress-fill {{ height: 100%; transition: width 0.3s; }}
+            .metric-row {{ display: flex; justify-content: space-between; align-items: center; margin: 1rem 0; }}
+            .metric-name {{ color: #aaa; }}
+            .metric-value {{ color: #fff; font-weight: bold; }}
+            .projection {{ background: #252525; padding: 1rem; border-radius: 6px; margin-top: 1rem; }}
+            .projection-label {{ color: #888; font-size: 0.9rem; }}
+            .projection-value {{ color: #ffa500; font-size: 1.3rem; font-weight: bold; }}
         </style>
         <div class="nav">
             <a href="../contents">Home</a>
@@ -1435,10 +1923,57 @@ def lambda_handler(event, context):
         <h1>Lambda Execution Statistics</h1>
 
         <div class="stats-summary">
-            <h2>Summary (All Time)</h2>
+            <h2>AWS Free Tier Usage (Current Month)</h2>
+            <div class="free-tier-box">
+                <div class="metric-row">
+                    <span class="metric-name">Requests</span>
+                    <span class="metric-value">{current_month_stats['requests']:,} / {FREE_TIER_REQUESTS:,} ({request_usage_pct:.1f}%)</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {min(request_usage_pct, 100):.1f}%; background: {status_colors[free_tier_status]};"></div>
+                </div>
+
+                <div class="metric-row" style="margin-top: 1.5rem;">
+                    <span class="metric-name">Compute (GB-seconds)</span>
+                    <span class="metric-value">{float(current_month_stats['gb_seconds']):,.1f} / {FREE_TIER_GB_SECONDS:,} ({gb_seconds_usage_pct:.1f}%)</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {min(gb_seconds_usage_pct, 100):.1f}%; background: {status_colors[free_tier_status]};"></div>
+                </div>
+
+                <div class="projection">
+                    <div class="projection-label">Monthly Projection (based on {days_elapsed} days):</div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 0.5rem;">
+                        <div>
+                            <div class="projection-label">Requests</div>
+                            <div class="projection-value">{projected_requests:,}</div>
+                        </div>
+                        <div>
+                            <div class="projection-label">GB-seconds</div>
+                            <div class="projection-value">{projected_gb_seconds:,.0f}</div>
+                        </div>
+                        <div>
+                            <div class="projection-label">Projected Cost</div>
+                            <div class="projection-value">${projected_cost:.4f}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="projection" style="background: #2a1a1a;">
+                    <div class="projection-label">Cost if Free Tier Exceeded (This Month):</div>
+                    <div class="projection-value" style="color: #ff6b6b;">${total_excess_cost:.4f}</div>
+                    <div style="font-size: 0.85rem; color: #888; margin-top: 0.5rem;">
+                        ({excess_requests:,} excess requests @ $0.20/M + {excess_gb_seconds:,.0f} excess GB-seconds)
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-summary">
+            <h2>Summary (All Time - Last {len(stats)} executions)</h2>
             <div class="stats-grid">
                 <div class="stat-box">
-                    <div class="stat-value">{total_executions}</div>
+                    <div class="stat-value">{total_executions:,}</div>
                     <div class="stat-label">Total Executions</div>
                 </div>
                 <div class="stat-box">
@@ -1457,6 +1992,11 @@ def lambda_handler(event, context):
         </div>
 
         <div class="chart-container">
+            <div class="chart-title">Executions by Endpoint (Last 30 Days)</div>
+            <canvas id="pathChart"></canvas>
+        </div>
+
+        <div class="chart-container">
             <div class="chart-title">Daily Execution Count</div>
             <canvas id="countChart"></canvas>
         </div>
@@ -1469,6 +2009,34 @@ def lambda_handler(event, context):
         <div class="chart-container">
             <div class="chart-title">Daily Cost (USD)</div>
             <canvas id="costChart"></canvas>
+        </div>
+
+        <div class="stats-summary">
+            <h2>Top Endpoints by Request Count</h2>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Total Requests</th>
+                        <th>Percentage</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for path_name, count in top_paths:
+            percentage = (count / total_executions * 100) if total_executions > 0 else 0
+            html += f'''
+                    <tr>
+                        <td>{path_name if path_name else '(root)'}</td>
+                        <td>{count:,}</td>
+                        <td>{percentage:.1f}%</td>
+                    </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
         </div>
 
         <div class="stats-summary">
@@ -1488,11 +2056,11 @@ def lambda_handler(event, context):
 
         for date in sorted_dates[:30]:  # Show last 30 days
             day_data = daily_stats[date]
-            avg_duration = float(day_data['total_duration_ms']) / day_data['count']
+            avg_duration = float(day_data['total_duration_ms']) / day_data['count'] if day_data['count'] > 0 else 0
             html += f'''
                     <tr>
                         <td>{date}</td>
-                        <td>{day_data['count']}</td>
+                        <td>{day_data['count']:,}</td>
                         <td>{float(day_data['total_duration_ms'])/1000:.1f}s</td>
                         <td>{avg_duration:.0f}ms</td>
                         <td>${float(day_data['total_cost_usd']):.4f}</td>
@@ -1509,6 +2077,56 @@ def lambda_handler(event, context):
         const chartCounts = ''' + str(chart_counts) + ''';
         const chartDurations = ''' + str([d/1000 for d in chart_durations]) + ''';
         const chartCosts = ''' + str(chart_costs) + ''';
+
+        // Prepare path breakdown data
+        const pathNames = ''' + str(list(all_paths)[:10]) + ''';  // Top 10 paths
+        const pathData = ''' + str({k: v[:len(chart_dates)] if len(v) >= len(chart_dates) else v + [0]*(len(chart_dates)-len(v))
+                                     for k, v in list(chart_path_data.items())[:10]}) + ''';
+
+        // Generate colors for paths
+        const pathColors = [
+            '#4a9eff', '#32cd32', '#ffa500', '#ff69b4', '#9370db',
+            '#00ced1', '#ff6347', '#98fb98', '#dda0dd', '#f0e68c'
+        ];
+
+        // Path Breakdown Stacked Chart
+        const pathDatasets = pathNames.map((pathName, idx) => ({
+            label: pathName || '(root)',
+            data: pathData[pathName] || [],
+            backgroundColor: pathColors[idx % pathColors.length],
+            borderColor: pathColors[idx % pathColors.length],
+            borderWidth: 1
+        }));
+
+        new Chart(document.getElementById('pathChart'), {
+            type: 'bar',
+            data: {
+                labels: chartDates,
+                datasets: pathDatasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: { color: '#fff' },
+                        position: 'bottom'
+                    }
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        ticks: { color: '#aaa' },
+                        grid: { color: '#3a3a3a' }
+                    },
+                    y: {
+                        stacked: true,
+                        ticks: { color: '#aaa' },
+                        grid: { color: '#3a3a3a' }
+                    }
+                }
+            }
+        });
 
         // Count Chart
         new Chart(document.getElementById('countChart'), {
@@ -1579,6 +2197,121 @@ def lambda_handler(event, context):
         });
         </script>
         '''
+
+    elif path.startswith(f'/{stage}/memspeed/upload') or path.startswith('/memspeed/upload'):
+        # Memspeed upload endpoint
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': json.dumps({'error': 'Unauthorized'}),
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'WWW-Authenticate': 'Basic realm="memspeed"'
+                }
+            }
+
+        try:
+            body = event.get('body', '{}')
+            if event.get('isBase64Encoded', False):
+                body = base64.b64decode(body).decode('utf-8')
+            data = json.loads(body)
+            success, result = save_memspeed_result(data)
+            if success:
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({'message': 'Upload successful', 'key': result}),
+                    'headers': {'Content-Type': 'application/json'}
+                }
+            else:
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': result}),
+                    'headers': {'Content-Type': 'application/json'}
+                }
+        except json.JSONDecodeError as e:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': f'Invalid JSON: {str(e)}'}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+
+    elif path.startswith(f'/{stage}/memspeed/download') or path.startswith('/memspeed/download'):
+        # Memspeed download endpoint - redirect to presigned URL
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': json.dumps({'error': 'Unauthorized'}),
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'WWW-Authenticate': 'Basic realm="memspeed"'
+                }
+            }
+
+        query_params = event.get('queryStringParameters', {}) or {}
+        filename = query_params.get('file', '')
+        if not filename:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Missing file parameter'}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+
+        key = f"{MEMSPEED_DOWNLOADS_PREFIX}{filename}"
+        url = get_memspeed_download_url(key)
+        if url:
+            return {
+                'statusCode': 302,
+                'body': '',
+                'headers': {'Location': url}
+            }
+        else:
+            return {
+                'statusCode': 404,
+                'body': json.dumps({'error': 'File not found'}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+
+    elif path.startswith(f'/{stage}/memspeed/data') or path.startswith('/memspeed/data'):
+        # Memspeed JSON API
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': json.dumps({'error': 'Unauthorized'}),
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'WWW-Authenticate': 'Basic realm="memspeed"'
+                }
+            }
+
+        results = get_memspeed_results()
+        # Remove internal _key field
+        for r in results:
+            r.pop('_key', None)
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'results': results}),
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            }
+        }
+
+    elif path == f'/{stage}/memspeed' or path == '/memspeed':
+        # Memspeed main page
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="memspeed"'
+                }
+            }
+
+        results = get_memspeed_results()
+        downloads = get_memspeed_downloads()
+        html += render_memspeed_page(results, downloads)
 
     elif path == f'/{stage}/t3' or path == '/t3':
         # Terse Transport Times - K2 bus arrivals
