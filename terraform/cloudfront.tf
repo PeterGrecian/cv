@@ -31,7 +31,6 @@ resource "aws_s3_bucket_acl" "b_acl" {
 
 resource "aws_s3_bucket" "cvlogs" {
     bucket = var.log_bucket
-    # FIXME
     # ACLs had to be enabled by hand - they are deprecated but terraform v1.9.8-dev
     # provider registry.terraform.io/hashicorp/aws v5.76.0 says
     # InvalidArgument: The S3 bucket that you specified for CloudFront logs does not enable ACL access
