@@ -1087,6 +1087,7 @@ def lambda_handler(event, context):
             <a href="../../contents">Home</a>
             <a href="../gardencam">Latest</a>
             <a href="gallery">Gallery</a>
+            <a href="videos">Videos</a>
             <a href="s3-stats">Storage</a>
         </div>
         <h1>Garden Camera Statistics</h1>
@@ -1340,6 +1341,7 @@ def lambda_handler(event, context):
             <div class="nav">
                 <a href="../../contents">Home</a>
                 <a href="../gardencam">Latest</a>
+                <a href="videos">Videos</a>
                 <a href="stats">Statistics</a>
             </div>
             <h1>Garden Camera Gallery Index</h1>
@@ -1539,6 +1541,7 @@ def lambda_handler(event, context):
             <a href="../../contents">Home</a>
             <a href="../gardencam">Latest</a>
             <a href="gallery">Gallery</a>
+            <a href="videos">Videos</a>
             <a href="stats">Capture Stats</a>
         </div>
         <h1>S3 Storage Statistics</h1>
@@ -1678,6 +1681,137 @@ def lambda_handler(event, context):
             </div>
             '''
 
+    elif path.startswith(f'/{stage}/gardencam/videos') or path.startswith('/gardencam/videos'):
+        # Timelapse video gallery page
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        # Get timelapse videos from S3
+        s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+        videos = []
+
+        try:
+            # List videos from S3
+            response = s3.list_objects_v2(
+                Bucket=GARDENCAM_BUCKET,
+                Prefix='videos/timelapse_'
+            )
+
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    if key.endswith('.mp4'):
+                        # Extract video ID from filename: videos/timelapse_YYYYMMDD-YYYYMMDD.mp4
+                        video_id = key.replace('videos/', '').replace('.mp4', '')
+
+                        # Parse date range from filename
+                        try:
+                            date_part = video_id.replace('timelapse_', '')
+                            start_date, end_date = date_part.split('-')
+                            start_formatted = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
+                            end_formatted = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
+                        except:
+                            start_formatted = "Unknown"
+                            end_formatted = "Unknown"
+
+                        # Get metadata from DynamoDB if available
+                        try:
+                            dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+                            metadata_table = dynamodb.Table('gardencam-video-metadata')
+                            metadata_response = metadata_table.get_item(Key={'video_id': video_id})
+
+                            if 'Item' in metadata_response:
+                                item = metadata_response['Item']
+                                frame_count = int(item.get('frame_count', 0))
+                                duration = int(item.get('duration_seconds', 5))
+                            else:
+                                frame_count = 0
+                                duration = 5
+                        except:
+                            frame_count = 0
+                            duration = 5
+
+                        videos.append({
+                            'id': video_id,
+                            'key': key,
+                            'url': f"https://{GARDENCAM_BUCKET}.s3.{GARDENCAM_REGION}.amazonaws.com/{key}",
+                            'size_mb': obj['Size'] / 1048576,
+                            'last_modified': obj['LastModified'].isoformat(),
+                            'start_date': start_formatted,
+                            'end_date': end_formatted,
+                            'frame_count': frame_count,
+                            'duration': duration
+                        })
+
+            # Sort by video ID (date) descending
+            videos.sort(key=lambda v: v['id'], reverse=True)
+
+        except Exception as e:
+            print(f"Error listing videos: {e}")
+            videos = []
+
+        # Render HTML
+        html += f'''
+        <title>Timelapse Videos - Garden Camera</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+            .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+            .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+            .nav a:hover {{ background: #3a3a3a; }}
+            h1 {{ text-align: center; margin-bottom: 2rem; }}
+            .video-grid {{ max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(600px, 1fr)); gap: 2rem; }}
+            .video-card {{ background: #2a2a2a; border-radius: 8px; overflow: hidden; padding: 1rem; }}
+            .video-card video {{ width: 100%; border-radius: 6px; background: #000; }}
+            .video-metadata {{ margin-top: 1rem; }}
+            .video-metadata h3 {{ margin: 0 0 0.5rem 0; color: #4a9eff; }}
+            .video-metadata p {{ margin: 0.25rem 0; color: #aaa; font-size: 0.9rem; }}
+            .download-btn {{ display: inline-block; margin-top: 0.5rem; padding: 0.5rem 1rem; background: #4a9eff; color: #fff; text-decoration: none; border-radius: 4px; font-size: 0.9rem; }}
+            .download-btn:hover {{ background: #3a8eef; }}
+            .no-videos {{ max-width: 800px; margin: 2rem auto; padding: 2rem; background: #2a2a2a; border-radius: 8px; text-align: center; }}
+        </style>
+        <div class="nav">
+            <a href="../../contents">Home</a>
+            <a href="../gardencam">Latest</a>
+            <a href="gallery">Gallery</a>
+            <a href="stats">Capture Stats</a>
+            <a href="s3-stats">Storage Stats</a>
+        </div>
+        <h1>Timelapse Videos</h1>
+        '''
+
+        if videos:
+            html += '<div class="video-grid">'
+            for video in videos:
+                html += f'''
+                <div class="video-card">
+                    <video controls loop preload="metadata">
+                        <source src="{video['url']}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="video-metadata">
+                        <h3>Week of {video['start_date']} to {video['end_date']}</h3>
+                        <p>{video['frame_count']} frames | {video['duration']}s duration | {video['size_mb']:.1f} MB</p>
+                        <a href="{video['url']}" download class="download-btn">Download MP4</a>
+                    </div>
+                </div>
+                '''
+            html += '</div>'
+        else:
+            html += '''
+            <div class="no-videos">
+                <h2>No Videos Yet</h2>
+                <p>Timelapse videos are generated weekly on Sundays at 2 AM UTC.</p>
+                <p style="color: #666; margin-top: 1rem;">Videos will appear here once the first weekly generation completes.</p>
+            </div>
+            '''
+
     elif path == f'/{stage}/gardencam' or path == '/gardencam':
         # Check authentication
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -1722,6 +1856,7 @@ def lambda_handler(event, context):
             </div>
             <h1>Garden Camera</h1>
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
+            <a href="gardencam/videos" class="gallery-link" style="margin-left: 0.5rem;">🎬 Timelapse Videos</a>
             <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">Capture Stats</a>
             <a href="gardencam/s3-stats" class="gallery-link" style="margin-left: 0.5rem;">Storage Stats</a>
             <button id="captureBtn" class="gallery-link" style="margin-left: 0.5rem; cursor: pointer;">📷 Capture Now</button>
