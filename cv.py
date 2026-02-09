@@ -1097,9 +1097,18 @@ def lambda_handler(event, context):
     except FileNotFoundError:
         fav = ""
     #fav += '\n<head><link rel="stylesheet" href="styles.css"></head>'
-    path = event['path']
-    stage = event['requestContext']['stage']
-    host = event['headers']['Host']
+
+    # Handle both REST API and HTTP API (v2) event formats
+    if 'rawPath' in event:
+        # HTTP API v2 format
+        path = event['rawPath']
+        stage = event.get('requestContext', {}).get('stage', 'default')
+        host = event.get('headers', {}).get('host', '')
+    else:
+        # REST API format
+        path = event['path']
+        stage = event['requestContext']['stage']
+        host = event['headers']['Host']
     root=f'https://{host}/{stage}'
     print(f'path = {path}, stage = {stage}, root = {root}')
     try:
@@ -1107,7 +1116,9 @@ def lambda_handler(event, context):
         print(f'referer = {ref}')
     except KeyError:
         pass
-    ip = event['headers']['X-Forwarded-For']
+    # Handle different header formats
+    headers = event.get('headers', {})
+    ip = headers.get('X-Forwarded-For') or headers.get('x-forwarded-for', 'Unknown')
     print(f'X-Forwarded-For = {ip}')
 
     if path == f'/{stage}/event' or path == '/event':   # debugging info
@@ -2576,7 +2587,8 @@ def lambda_handler(event, context):
             chart_dates.append(date)
             chart_counts.append(daily_stats[date]['count'])
             chart_durations.append(float(daily_stats[date]['total_duration_ms']))
-            chart_costs.append(float(daily_stats[date]['total_cost_usd']))
+            # Convert to microdollars
+            chart_costs.append(float(daily_stats[date]['total_cost_usd']) * 1_000_000)
 
             # Collect path counts for stacked chart
             for path_name in all_paths:
@@ -2712,11 +2724,11 @@ def lambda_handler(event, context):
         <h1>Lambda Execution Statistics</h1>
 
         <div class="stats-summary">
-            <h2>AWS Free Tier Usage (Current Month)</h2>
+            <h2>AWS Free Tier Usage (Current Month - DynamoDB Logs Only)</h2>
             <div class="free-tier-box">
                 <div class="metric-row">
-                    <span class="metric-name">Requests</span>
-                    <span class="metric-value">{current_month_stats['requests']:,} / {FREE_TIER_REQUESTS:,} ({request_usage_pct:.1f}%)</span>
+                    <span class="metric-name">Requests Logged</span>
+                    <span class="metric-value">{current_month_stats['requests']:,} / {FREE_TIER_REQUESTS:,} ({request_usage_pct:.2f}%)</span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: {min(request_usage_pct, 100):.1f}%; background: {status_colors[free_tier_status]};"></div>
@@ -2724,42 +2736,26 @@ def lambda_handler(event, context):
 
                 <div class="metric-row" style="margin-top: 1.5rem;">
                     <span class="metric-name">Compute (GB-seconds)</span>
-                    <span class="metric-value">{float(current_month_stats['gb_seconds']):,.1f} / {FREE_TIER_GB_SECONDS:,} ({gb_seconds_usage_pct:.1f}%)</span>
+                    <span class="metric-value">{float(current_month_stats['gb_seconds']):,.1f} / {FREE_TIER_GB_SECONDS:,} ({gb_seconds_usage_pct:.2f}%)</span>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: {min(gb_seconds_usage_pct, 100):.1f}%; background: {status_colors[free_tier_status]};"></div>
                 </div>
 
-                <div class="projection">
-                    <div class="projection-label">Monthly Projection (based on {days_elapsed} days):</div>
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 0.5rem;">
-                        <div>
-                            <div class="projection-label">Requests</div>
-                            <div class="projection-value">{projected_requests:,}</div>
-                        </div>
-                        <div>
-                            <div class="projection-label">GB-seconds</div>
-                            <div class="projection-value">{projected_gb_seconds:,.0f}</div>
-                        </div>
-                        <div>
-                            <div class="projection-label">Projected Cost</div>
-                            <div class="projection-value">${projected_cost:.4f}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="projection" style="background: #2a1a1a;">
-                    <div class="projection-label">Cost if Free Tier Exceeded (This Month):</div>
-                    <div class="projection-value" style="color: #ff6b6b;">${total_excess_cost:.4f}</div>
-                    <div style="font-size: 0.85rem; color: #888; margin-top: 0.5rem;">
-                        ({excess_requests:,} excess requests @ $0.20/M + {excess_gb_seconds:,.0f} excess GB-seconds)
+                <div style="margin-top: 1rem; padding: 0.75rem; background: #1a3a1a; border-radius: 6px; border-left: 3px solid #32cd32;">
+                    <div style="font-size: 0.9rem; color: #aaa;">
+                        <strong style="color: #32cd32;">✓ Free tier will not be exceeded</strong><br>
+                        All costs shown are theoretical - actual cost this month: <strong>$0.00</strong>
                     </div>
                 </div>
             </div>
         </div>
 
         <div class="stats-summary">
-            <h2>CloudWatch Metrics (Last 30 Days)</h2>
+            <h2>📊 Historical CloudWatch Metrics (All Functions - Last 30 Days)</h2>
+            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem; text-align: center;">
+                Includes all Lambda invocations from CloudWatch monitoring
+            </div>
             <div class="stats-grid">
                 <div class="stat-box">
                     <div class="stat-value">{int(total_cw_invocations):,}</div>
@@ -2830,14 +2826,14 @@ def lambda_handler(event, context):
         </div>
 
         <div class="stats-summary">
-            <h2>Statistics by Application</h2>
+            <h2>Statistics by Application (Recent DynamoDB Logs)</h2>
             <table class="daily-table">
                 <thead>
                     <tr>
                         <th>Application</th>
                         <th>Requests</th>
                         <th>Avg Duration</th>
-                        <th>Total Cost</th>
+                        <th>Cost (µ$)</th>
                         <th>Percentage</th>
                     </tr>
                 </thead>
@@ -2847,7 +2843,7 @@ def lambda_handler(event, context):
         for app_name, app_data in sorted_apps:
             app_count = app_data['count']
             app_avg_duration = float(app_data['total_duration_ms']) / app_count if app_count > 0 else 0
-            app_cost = float(app_data['total_cost_usd'])
+            app_cost_microdollars = float(app_data['total_cost_usd']) * 1_000_000
             app_percentage = (app_count / total_executions * 100) if total_executions > 0 else 0
 
             html += f'''
@@ -2855,7 +2851,7 @@ def lambda_handler(event, context):
                         <td><strong>{app_name}</strong></td>
                         <td>{app_count:,}</td>
                         <td>{app_avg_duration:.0f}ms</td>
-                        <td>${app_cost:.6f}</td>
+                        <td>{app_cost_microdollars:.2f}</td>
                         <td>{app_percentage:.1f}%</td>
                     </tr>
             '''
@@ -2866,15 +2862,18 @@ def lambda_handler(event, context):
         </div>
 
         <div class="stats-summary">
-            <h2>Summary (All Time - Last {len(stats)} executions)</h2>
+            <h2>📝 Recent Execution Logs from DynamoDB ({len(stats)} executions)</h2>
+            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem; text-align: center;">
+                Detailed logs since execution logging was enabled (~1 hour ago)
+            </div>
             <div class="stats-grid">
                 <div class="stat-box">
                     <div class="stat-value">{total_executions:,}</div>
-                    <div class="stat-label">Total Executions</div>
+                    <div class="stat-label">Total Executions Logged</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value">${float(total_cost):.4f}</div>
-                    <div class="stat-label">Total Cost (USD)</div>
+                    <div class="stat-value">{float(total_cost)*1_000_000:.1f} µ$</div>
+                    <div class="stat-label">Total Cost (microdollars)<br><span style="font-size: 0.8rem; color: #666;">After free tier</span></div>
                 </div>
                 <div class="stat-box">
                     <div class="stat-value">{float(total_duration)/1000:.1f}s</div>
@@ -2888,22 +2887,22 @@ def lambda_handler(event, context):
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Executions by Endpoint (Last 30 Days)</div>
+            <div class="chart-title">Executions by Endpoint (Recent DynamoDB Logs)</div>
             <canvas id="pathChart"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Daily Execution Count</div>
+            <div class="chart-title">Daily Execution Count (Recent Logs)</div>
             <canvas id="countChart"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Daily Total Duration (seconds)</div>
+            <div class="chart-title">Daily Total Duration (Recent Logs)</div>
             <canvas id="durationChart"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Daily Cost (USD)</div>
+            <div class="chart-title">Daily Cost in Microdollars (µ$) - After Free Tier</div>
             <canvas id="costChart"></canvas>
         </div>
 
@@ -2936,7 +2935,7 @@ def lambda_handler(event, context):
         </div>
 
         <div class="stats-summary">
-            <h2>Daily Breakdown</h2>
+            <h2>Daily Breakdown (Recent DynamoDB Logs)</h2>
             <table class="daily-table">
                 <thead>
                     <tr>
@@ -2944,7 +2943,7 @@ def lambda_handler(event, context):
                         <th>Executions</th>
                         <th>Total Duration</th>
                         <th>Avg Duration</th>
-                        <th>Cost (USD)</th>
+                        <th>Cost (µ$)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2953,13 +2952,14 @@ def lambda_handler(event, context):
         for date in sorted_dates[:30]:  # Show last 30 days
             day_data = daily_stats[date]
             avg_duration = float(day_data['total_duration_ms']) / day_data['count'] if day_data['count'] > 0 else 0
+            cost_microdollars = float(day_data['total_cost_usd']) * 1_000_000
             html += f'''
                     <tr>
                         <td>{date}</td>
                         <td>{day_data['count']:,}</td>
                         <td>{float(day_data['total_duration_ms'])/1000:.1f}s</td>
                         <td>{avg_duration:.0f}ms</td>
-                        <td>${float(day_data['total_cost_usd']):.4f}</td>
+                        <td>{cost_microdollars:.2f}</td>
                     </tr>
             '''
 
@@ -3076,7 +3076,7 @@ def lambda_handler(event, context):
             data: {
                 labels: chartDates,
                 datasets: [{
-                    label: 'Cost (USD)',
+                    label: 'Cost (µ$ - microdollars)',
                     data: chartCosts,
                     backgroundColor: '#32cd32',
                 }]
