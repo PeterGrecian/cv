@@ -2647,7 +2647,12 @@ def lambda_handler(event, context):
             country_counts[geo['country']] += data['count']
 
         top_uas = ua_data.most_common(10)
-        
+
+        # Path analysis
+        path_counts = Counter(item.get('path', 'unknown') for item in stats)
+        total_requests = sum(path_counts.values())
+        top_paths = path_counts.most_common(10)
+
         html += f'''
         <!DOCTYPE html>
         <html lang="en">
@@ -2729,6 +2734,33 @@ def lambda_handler(event, context):
                     </tr>
             '''
         
+        html += '''
+                </tbody>
+            </table>
+
+            <h2>📍 Path Analysis (Top Endpoints)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Requests</th>
+                        <th>Percentage</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for path, count in top_paths:
+            percentage = (count / total_requests * 100) if total_requests > 0 else 0
+            display_path = path if path else '(root)'
+            html += f'''
+                    <tr>
+                        <td><code>{display_path}</code></td>
+                        <td>{count:,}</td>
+                        <td>{percentage:.1f}%</td>
+                    </tr>
+            '''
+
         html += '''
                 </tbody>
             </table>
