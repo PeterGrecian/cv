@@ -2578,23 +2578,94 @@ def lambda_handler(event, context):
             html += '<title>Garden Camera</title><h1>Garden Camera</h1><p>No images available yet.</p>'
 
     elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
-        # Minimal Lambda statistics - CloudWatch metrics only
+        # Minimal Lambda statistics - CloudWatch metrics + IP/User-Agent analysis
         all_lambda_metrics = get_all_lambda_metrics(days=30)
-        
+
         # Calculate aggregated stats
         total_cw_invocations = sum(m['invocations'] for m in all_lambda_metrics.values())
         total_cw_errors = sum(m['errors'] for m in all_lambda_metrics.values())
         total_cw_throttles = sum(m['throttles'] for m in all_lambda_metrics.values())
-        
+
         # Calculate weighted average duration
         total_duration_weighted = sum(m['avg_duration'] * m['invocations'] for m in all_lambda_metrics.values())
         avg_cw_duration = total_duration_weighted / total_cw_invocations if total_cw_invocations > 0 else 0
         max_cw_duration = max((m['max_duration'] for m in all_lambda_metrics.values()), default=0)
-        
+
         error_rate = (total_cw_errors / total_cw_invocations * 100) if total_cw_invocations > 0 else 0
-        
+
         # Sort functions by invocation count
         sorted_functions = sorted(all_lambda_metrics.items(), key=lambda x: x[1]['invocations'], reverse=True)
+
+        # Load DynamoDB logs for IP/User-Agent analysis
+        from collections import Counter, defaultdict
+        stats = get_lambda_execution_stats()
+
+        ip_data = defaultdict(lambda: {'count': 0, 'paths': Counter(), 'timestamps': [], 'user_agents': Counter()})
+        ua_data = Counter()
+
+        for item in stats:
+            ip = item.get('ip_address', 'Unknown')
+            ua = item.get('user_agent', 'Unknown')
+            path_item = item.get('path', 'unknown')
+            timestamp = item.get('timestamp', '')
+
+            if ip and ip != 'Unknown':
+                ip_data[ip]['count'] += 1
+                ip_data[ip]['paths'][path_item] += 1
+                ip_data[ip]['user_agents'][ua] += 1
+                if timestamp:
+                    try:
+                        from datetime import datetime
+                        ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        ip_data[ip]['timestamps'].append(ts)
+                    except:
+                        pass
+
+            if ua and ua != 'Unknown':
+                ua_data[ua] += 1
+
+        # Get geolocation for top IPs (limit to 10 to avoid rate limits)
+        import time as time_module
+        top_ips = sorted(ip_data.items(), key=lambda x: x[1]['count'], reverse=True)[:10]
+        ip_geo_data = []
+        country_counts = Counter()
+
+        for ip, data in top_ips:
+            time_module.sleep(0.15)  # Rate limit
+            geo = get_ip_geolocation(ip)
+            top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
+            top_ua = data['user_agents'].most_common(1)[0] if data['user_agents'] else ('Unknown', 0)
+
+            ip_geo_data.append({
+                'ip': ip,
+                'count': data['count'],
+                'country': geo['country'],
+                'city': geo['city'],
+                'top_path': top_path[0],
+                'top_ua': top_ua[0]
+            })
+            country_counts[geo['country']] += data['count']
+
+        # Detect automated patterns
+        automated_ips = []
+        for ip, data in ip_data.items():
+            if len(data['timestamps']) > 1:
+                sorted_times = sorted(data['timestamps'])
+                intervals = [(sorted_times[i+1] - sorted_times[i]).total_seconds() / 60
+                            for i in range(len(sorted_times)-1)]
+                if intervals:
+                    avg_interval = sum(intervals) / len(intervals)
+                    if avg_interval < 30:  # Less than 30 minutes
+                        top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
+                        automated_ips.append({
+                            'ip': ip,
+                            'count': data['count'],
+                            'avg_interval': avg_interval,
+                            'top_path': top_path[0]
+                        })
+
+        automated_ips.sort(key=lambda x: x['avg_interval'])
+        top_uas = ua_data.most_common(10)
         
         html += f'''
         <!DOCTYPE html>
@@ -2680,6 +2751,101 @@ def lambda_handler(event, context):
         html += '''
                 </tbody>
             </table>
+
+            <h2>🌍 IP Address Analysis with Geolocation</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Country</th>
+                        <th>City</th>
+                        <th>Requests</th>
+                        <th>Top Path</th>
+                        <th>User-Agent</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for ip_info in ip_geo_data:
+            ua_short = (ip_info['top_ua'][:80] + '...') if len(ip_info['top_ua']) > 80 else ip_info['top_ua']
+            html += f'''
+                    <tr>
+                        <td><code>{ip_info['ip']}</code></td>
+                        <td>{ip_info['country']}</td>
+                        <td>{ip_info['city']}</td>
+                        <td>{ip_info['count']:,}</td>
+                        <td><code>{ip_info['top_path'] if ip_info['top_path'] else '(root)'}</code></td>
+                        <td style="font-size: 0.85rem;">{ua_short}</td>
+                    </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
+
+            <h2>📱 Top User-Agents (Browsers/Devices)</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>User-Agent</th>
+                        <th>Requests</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for ua, count in top_uas:
+            ua_display = (ua[:120] + '...') if len(ua) > 120 else ua
+            html += f'''
+                    <tr>
+                        <td style="font-size: 0.9rem; word-break: break-all;">{ua_display}</td>
+                        <td>{count:,}</td>
+                    </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
+        '''
+
+        if automated_ips:
+            html += '''
+            <h2>🤖 Automated Request Detection</h2>
+            <p style="color: #666; margin: 1rem 0;">IPs making requests at regular intervals (< 30 min average)</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Requests</th>
+                        <th>Avg Interval</th>
+                        <th>Top Path</th>
+                    </tr>
+                </thead>
+                <tbody>
+            '''
+
+            for pattern in automated_ips:
+                warning_style = 'background: #fff3cd;' if pattern['avg_interval'] < 5 else ''
+                html += f'''
+                    <tr style="{warning_style}">
+                        <td><code>{pattern['ip']}</code></td>
+                        <td>{pattern['count']:,}</td>
+                        <td><strong>{pattern['avg_interval']:.1f} minutes</strong></td>
+                        <td><code>{pattern['top_path'] if pattern['top_path'] else '(root)'}</code></td>
+                    </tr>
+                '''
+
+            html += '''
+                </tbody>
+            </table>
+            <p style="background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 4px solid #ffc107;">
+                <strong>⚠️ Note:</strong> Rows highlighted in yellow indicate very frequent automated requests (< 5 min intervals).
+                These may be widgets, auto-refresh browsers, or cron jobs.
+            </p>
+            '''
+
+        html += '''
         </div>
         </body>
         </html>
