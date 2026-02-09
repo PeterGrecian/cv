@@ -2646,25 +2646,6 @@ def lambda_handler(event, context):
             })
             country_counts[geo['country']] += data['count']
 
-        # Detect automated patterns
-        automated_ips = []
-        for ip, data in ip_data.items():
-            if len(data['timestamps']) > 1:
-                sorted_times = sorted(data['timestamps'])
-                intervals = [(sorted_times[i+1] - sorted_times[i]).total_seconds() / 60
-                            for i in range(len(sorted_times)-1)]
-                if intervals:
-                    avg_interval = sum(intervals) / len(intervals)
-                    if avg_interval < 30:  # Less than 30 minutes
-                        top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
-                        automated_ips.append({
-                            'ip': ip,
-                            'count': data['count'],
-                            'avg_interval': avg_interval,
-                            'top_path': top_path[0]
-                        })
-
-        automated_ips.sort(key=lambda x: x['avg_interval'])
         top_uas = ua_data.most_common(10)
         
         html += f'''
@@ -2807,45 +2788,6 @@ def lambda_handler(event, context):
         html += '''
                 </tbody>
             </table>
-        '''
-
-        if automated_ips:
-            html += '''
-            <h2>🤖 Automated Request Detection</h2>
-            <p style="color: #666; margin: 1rem 0;">IPs making requests at regular intervals (< 30 min average)</p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>IP Address</th>
-                        <th>Requests</th>
-                        <th>Avg Interval</th>
-                        <th>Top Path</th>
-                    </tr>
-                </thead>
-                <tbody>
-            '''
-
-            for pattern in automated_ips:
-                warning_style = 'background: #fff3cd;' if pattern['avg_interval'] < 5 else ''
-                html += f'''
-                    <tr style="{warning_style}">
-                        <td><code>{pattern['ip']}</code></td>
-                        <td>{pattern['count']:,}</td>
-                        <td><strong>{pattern['avg_interval']:.1f} minutes</strong></td>
-                        <td><code>{pattern['top_path'] if pattern['top_path'] else '(root)'}</code></td>
-                    </tr>
-                '''
-
-            html += '''
-                </tbody>
-            </table>
-            <p style="background: #fff3cd; padding: 1rem; border-radius: 4px; border-left: 4px solid #ffc107;">
-                <strong>⚠️ Note:</strong> Rows highlighted in yellow indicate very frequent automated requests (< 5 min intervals).
-                These may be widgets, auto-refresh browsers, or cron jobs.
-            </p>
-            '''
-
-        html += '''
         </div>
         </body>
         </html>
