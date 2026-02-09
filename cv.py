@@ -435,10 +435,12 @@ def get_cloudwatch_metrics(function_name, days=30):
 def get_all_lambda_metrics(days=30):
     """Get CloudWatch metrics for all Lambda functions."""
     functions = get_all_lambda_functions()
+    print(f"Found {len(functions)} Lambda functions: {functions}")
     all_metrics = {}
 
     for func_name in functions:
         metrics = get_cloudwatch_metrics(func_name, days)
+        print(f"Metrics for {func_name}: {len(metrics)} metric types")
         if metrics:
             # Calculate totals
             total_invocations = sum(dp.get('Sum', 0) for dp in metrics.get('invocations', []))
