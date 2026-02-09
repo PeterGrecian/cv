@@ -2720,6 +2720,11 @@ def lambda_handler(event, context):
         status_colors = {'good': '#32cd32', 'warning': '#ffa500', 'danger': '#ff4444'}
 
         html += f'''
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Lambda Execution Statistics</title>
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
         <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
@@ -2751,6 +2756,8 @@ def lambda_handler(event, context):
             .projection-label {{ color: #888; font-size: 0.9rem; }}
             .projection-value {{ color: #ffa500; font-size: 1.3rem; font-weight: bold; }}
         </style>
+        </head>
+        <body>
         <div class="nav">
             <a href="../contents">Home</a>
         </div>
@@ -3729,6 +3736,8 @@ def lambda_handler(event, context):
         // Initial render
         updateInteractiveChart();
         </script>
+        </body>
+        </html>
         '''
 
     elif path.startswith(f'/{stage}/memspeed/upload') or path.startswith('/memspeed/upload'):
