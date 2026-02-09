@@ -2578,7 +2578,7 @@ def lambda_handler(event, context):
             html += '<title>Garden Camera</title><h1>Garden Camera</h1><p>No images available yet.</p>'
 
     elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
-        # Minimal Lambda statistics - CloudWatch metrics + IP/User-Agent analysis
+        # Lambda statistics - CloudWatch metrics + DynamoDB analysis (paths, IPs, user agents)
         all_lambda_metrics = get_all_lambda_metrics(days=30)
 
         # Calculate aggregated stats
@@ -2596,7 +2596,7 @@ def lambda_handler(event, context):
         # Sort functions by invocation count
         sorted_functions = sorted(all_lambda_metrics.items(), key=lambda x: x[1]['invocations'], reverse=True)
 
-        # Load DynamoDB logs for IP/User-Agent analysis
+        # Load DynamoDB logs for IP/User-Agent and path analysis
         from collections import Counter, defaultdict
         stats = get_lambda_execution_stats()
 
@@ -2648,8 +2648,8 @@ def lambda_handler(event, context):
 
         top_uas = ua_data.most_common(10)
 
-        # Path analysis
-        path_counts = Counter(item.get('path', 'unknown') for item in stats)
+        # Path analysis (DynamoDB only, filter out empty paths from backfill)
+        path_counts = Counter(item.get('path') for item in stats if item.get('path'))
         total_requests = sum(path_counts.values())
         top_paths = path_counts.most_common(10)
 
@@ -2752,10 +2752,9 @@ def lambda_handler(event, context):
 
         for path, count in top_paths:
             percentage = (count / total_requests * 100) if total_requests > 0 else 0
-            display_path = path if path else '(root)'
             html += f'''
                     <tr>
-                        <td><code>{display_path}</code></td>
+                        <td><code>{path}</code></td>
                         <td>{count:,}</td>
                         <td>{percentage:.1f}%</td>
                     </tr>
