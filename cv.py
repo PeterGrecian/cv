@@ -2608,23 +2608,34 @@ def lambda_handler(event, context):
         # Sort by date
         sorted_dates = sorted(daily_stats.keys(), reverse=True)
 
-        # Prepare chart data
+        # Prepare chart data - last 10 CALENDAR days from today
         chart_dates = []
         chart_counts = []
         chart_durations = []
         chart_costs = []
         chart_path_data = defaultdict(list)
 
-        for date in reversed(sorted_dates[-10:]):  # Last 10 days
-            chart_dates.append(date)
-            chart_counts.append(daily_stats[date]['count'])
-            chart_durations.append(float(daily_stats[date]['total_duration_ms']))
-            # Convert to microdollars
-            chart_costs.append(float(daily_stats[date]['total_cost_usd']) * 1_000_000)
+        # Get last 10 calendar days
+        today = datetime.utcnow().date()
+        last_10_days = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(9, -1, -1)]
 
-            # Collect path counts for stacked chart
-            for path_name in all_paths:
-                chart_path_data[path_name].append(daily_stats[date]['paths'].get(path_name, 0))
+        for date in last_10_days:
+            chart_dates.append(date)
+            if date in daily_stats:
+                chart_counts.append(daily_stats[date]['count'])
+                chart_durations.append(float(daily_stats[date]['total_duration_ms']))
+                chart_costs.append(float(daily_stats[date]['total_cost_usd']) * 1_000_000)
+
+                # Collect path counts for stacked chart
+                for path_name in all_paths:
+                    chart_path_data[path_name].append(daily_stats[date]['paths'].get(path_name, 0))
+            else:
+                # No data for this day - fill with zeros
+                chart_counts.append(0)
+                chart_durations.append(0)
+                chart_costs.append(0)
+                for path_name in all_paths:
+                    chart_path_data[path_name].append(0)
 
         total_executions = sum(d['count'] for d in daily_stats.values())
         total_cost = sum(d['total_cost_usd'] for d in daily_stats.values())
