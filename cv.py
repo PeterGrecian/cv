@@ -3004,7 +3004,176 @@ def lambda_handler(event, context):
                 </tbody>
             </table>
         </div>
+        '''
 
+        # IP Address and User-Agent Analysis
+        from collections import Counter
+
+        ip_data = defaultdict(lambda: {'count': 0, 'paths': Counter(), 'timestamps': [], 'user_agents': Counter()})
+        ua_data = Counter()
+
+        for item in stats:
+            ip = item.get('ip_address', 'Unknown')
+            ua = item.get('user_agent', 'Unknown')
+            path = item.get('path', 'unknown')
+            timestamp = item.get('timestamp', '')
+
+            if ip and ip != 'Unknown':
+                ip_data[ip]['count'] += 1
+                ip_data[ip]['paths'][path] += 1
+                ip_data[ip]['user_agents'][ua] += 1
+                if timestamp:
+                    try:
+                        ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        ip_data[ip]['timestamps'].append(ts)
+                    except:
+                        pass
+
+            if ua and ua != 'Unknown':
+                ua_data[ua] += 1
+
+        # Detect automated patterns
+        ip_patterns = []
+        for ip, data in ip_data.items():
+            if len(data['timestamps']) > 1:
+                timestamps = sorted(data['timestamps'])
+                intervals = [(timestamps[i+1] - timestamps[i]).total_seconds() / 60 for i in range(len(timestamps)-1)]
+                if intervals:
+                    avg_interval = sum(intervals) / len(intervals)
+                    if avg_interval < 30:  # Less than 30 minutes average
+                        top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
+                        top_ua = data['user_agents'].most_common(1)[0] if data['user_agents'] else ('Unknown', 0)
+                        ip_patterns.append({
+                            'ip': ip,
+                            'count': data['count'],
+                            'avg_interval': avg_interval,
+                            'top_path': top_path[0],
+                            'top_ua': top_ua[0]
+                        })
+
+        # Sort by count
+        top_ips = sorted(ip_data.items(), key=lambda x: x[1]['count'], reverse=True)[:20]
+        top_uas = ua_data.most_common(20)
+        sorted_patterns = sorted(ip_patterns, key=lambda x: x['avg_interval'])
+
+        html += f'''
+        <div class="stats-summary">
+            <h2>🌐 IP Address Analysis ({len(ip_data)} unique IPs)</h2>
+            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
+                Showing top 20 IP addresses by request count
+            </div>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Requests</th>
+                        <th>Top Path</th>
+                        <th>Top User-Agent</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for ip, data in top_ips:
+            top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
+            top_ua = data['user_agents'].most_common(1)[0] if data['user_agents'] else ('Unknown', 0)
+            ua_short = (top_ua[0][:60] + '...') if len(top_ua[0]) > 60 else top_ua[0]
+
+            html += f'''
+                    <tr>
+                        <td><code>{ip}</code></td>
+                        <td>{data['count']:,}</td>
+                        <td>{top_path[0] if top_path[0] else '(root)'}</td>
+                        <td style="font-size: 0.85rem; color: #aaa;">{ua_short}</td>
+                    </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
+        </div>
+
+        <div class="stats-summary">
+            <h2>📱 User-Agent Analysis</h2>
+            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
+                Showing top 20 browsers/devices by request count
+            </div>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>User-Agent</th>
+                        <th>Requests</th>
+                        <th>Percentage</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        total_ua_requests = sum(ua_data.values())
+        for ua, count in top_uas:
+            percentage = (count / total_ua_requests * 100) if total_ua_requests > 0 else 0
+            ua_short = (ua[:100] + '...') if len(ua) > 100 else ua
+
+            html += f'''
+                    <tr>
+                        <td style="font-size: 0.85rem; word-break: break-all;">{ua_short}</td>
+                        <td>{count:,}</td>
+                        <td>{percentage:.1f}%</td>
+                    </tr>
+            '''
+
+        html += '''
+                </tbody>
+            </table>
+        </div>
+        '''
+
+        if sorted_patterns:
+            html += f'''
+        <div class="stats-summary">
+            <h2>🤖 Automated Request Detection</h2>
+            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
+                IPs making requests at regular intervals (< 30 min average)
+            </div>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>IP Address</th>
+                        <th>Requests</th>
+                        <th>Avg Interval</th>
+                        <th>Top Path</th>
+                        <th>User-Agent</th>
+                    </tr>
+                </thead>
+                <tbody>
+            '''
+
+            for pattern in sorted_patterns:
+                interval_str = f"{pattern['avg_interval']:.1f} min"
+                ua_short = (pattern['top_ua'][:60] + '...') if len(pattern['top_ua']) > 60 else pattern['top_ua']
+                warning_style = 'background: #3a1a1a; color: #ffa500;' if pattern['avg_interval'] < 5 else ''
+
+                html += f'''
+                    <tr style="{warning_style}">
+                        <td><code>{pattern['ip']}</code></td>
+                        <td>{pattern['count']:,}</td>
+                        <td><strong>{interval_str}</strong></td>
+                        <td>{pattern['top_path'] if pattern['top_path'] else '(root)'}</td>
+                        <td style="font-size: 0.85rem; color: #aaa;">{ua_short}</td>
+                    </tr>
+                '''
+
+            html += '''
+                </tbody>
+            </table>
+            <div style="margin-top: 1rem; padding: 1rem; background: #2a2a1a; border-left: 4px solid #ffa500; border-radius: 4px;">
+                <strong style="color: #ffa500;">⚠️ Note:</strong> Rows highlighted in orange indicate very frequent automated requests (< 5 min intervals).
+                These may be widgets, auto-refresh browsers, or cron jobs.
+            </div>
+        </div>
+            '''
+
+        html += '''
         <script>
         const chartDates = ''' + str(chart_dates) + ''';
         const chartCounts = ''' + str(chart_counts) + ''';

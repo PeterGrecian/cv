@@ -1,0 +1,168 @@
+[I 2026-02-09 15:43:28.927 ServerApp] jupyter_lsp | extension was successfully linked.
+[I 2026-02-09 15:43:28.931 ServerApp] jupyter_server_terminals | extension was successfully linked.
+[I 2026-02-09 15:43:28.936 ServerApp] jupyterlab | extension was successfully linked.
+[I 2026-02-09 15:43:28.941 ServerApp] notebook | extension was successfully linked.
+[I 2026-02-09 15:43:28.943 ServerApp] Writing Jupyter server cookie secret to /home/tot/.local/share/jupyter/runtime/jupyter_cookie_secret
+[I 2026-02-09 15:43:29.210 ServerApp] notebook_shim | extension was successfully linked.
+[I 2026-02-09 15:43:29.234 ServerApp] notebook_shim | extension was successfully loaded.
+[I 2026-02-09 15:43:29.236 ServerApp] jupyter_lsp | extension was successfully loaded.
+[I 2026-02-09 15:43:29.237 ServerApp] jupyter_server_terminals | extension was successfully loaded.
+[I 2026-02-09 15:43:29.241 LabApp] JupyterLab extension loaded from /home/tot/.local/lib/python3.10/site-packages/jupyterlab
+[I 2026-02-09 15:43:29.241 LabApp] JupyterLab application directory is /home/tot/.local/share/jupyter/lab
+[I 2026-02-09 15:43:29.241 LabApp] Extension Manager is 'pypi'.
+[I 2026-02-09 15:43:29.292 ServerApp] jupyterlab | extension was successfully loaded.
+[I 2026-02-09 15:43:29.297 ServerApp] notebook | extension was successfully loaded.
+[I 2026-02-09 15:43:29.298 ServerApp] Serving notebooks from local directory: /home/tot/cv
+[I 2026-02-09 15:43:29.298 ServerApp] Jupyter Server 2.17.0 is running at:
+[I 2026-02-09 15:43:29.298 ServerApp] http://localhost:8888/tree?token=fced65fabd988be48e9e236cabc127930ccb0ee1c7041556
+[I 2026-02-09 15:43:29.298 ServerApp]     http://127.0.0.1:8888/tree?token=fced65fabd988be48e9e236cabc127930ccb0ee1c7041556
+[I 2026-02-09 15:43:29.298 ServerApp] Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
+[C 2026-02-09 15:43:29.301 ServerApp] 
+    
+    To access the server, open this file in a browser:
+        file:///home/tot/.local/share/jupyter/runtime/jpserver-52349-open.html
+    Or copy and paste one of these URLs:
+        http://localhost:8888/tree?token=fced65fabd988be48e9e236cabc127930ccb0ee1c7041556
+        http://127.0.0.1:8888/tree?token=fced65fabd988be48e9e236cabc127930ccb0ee1c7041556
+[I 2026-02-09 15:43:30.624 ServerApp] Skipped non-installed server(s): basedpyright, bash-language-server, dockerfile-language-server-nodejs, javascript-typescript-langserver, jedi-language-server, julia-language-server, pyrefly, pyright, python-language-server, python-lsp-server, r-languageserver, sql-language-server, texlab, typescript-language-server, unified-language-server, vscode-css-languageserver-bin, vscode-html-languageserver-bin, vscode-json-languageserver-bin, yaml-language-server
+[I 2026-02-09 15:55:38.361 ServerApp] 302 GET /?token=[secret] (@127.0.0.1) 0.97ms
+[I 2026-02-09 16:04:57.456 ServerApp] Writing notebook-signing key to /home/tot/.local/share/jupyter/notebook_secret
+[W 2026-02-09 16:04:57.459 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[W 2026-02-09 16:04:58.646 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 16:04:59.389 ServerApp] Kernel started: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 16:05:00.331 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 16:05:00.332 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[W 2026-02-09 16:05:00.336 ServerApp] The websocket_ping_timeout (90000) cannot be longer than the websocket_ping_interval (30000).
+    Setting websocket_ping_timeout=30000
+[I 2026-02-09 16:05:00.358 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 16:05:00.358 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 16:05:00.381 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 16:05:00.382 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[W 2026-02-09 16:05:00.446 ServerApp] Got events for closed stream <zmq.eventloop.zmqstream.ZMQStream object at 0x73fd228997b0>
+[I 2026-02-09 16:05:04.348 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 16:05:04.349 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 16:06:58.832 ServerApp] Saving file at /lambda_analysis.ipynb
+[I 2026-02-09 17:18:49.145 ServerApp] Saving file at /lambda_analysis.ipynb
+[I 2026-02-09 17:36:27.526 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:8186d5f9-6ce9-4754-b331-e4f1f0f871e5
+[W 2026-02-09 17:36:30.665 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 17:36:32.312 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:36:32.319 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[W 2026-02-09 17:36:32.512 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 17:36:33.323 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:bb7ba7fe-3505-432e-bbae-5d35a9c2f1d3
+[I 2026-02-09 17:36:33.647 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:36:33.647 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:36:40.444 ServerApp] Kernel restarted: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 17:36:40.451 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:2d7338f8-121d-4935-82df-2529a1ba4f17
+[I 2026-02-09 17:36:40.767 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:36:40.768 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:36:40.768 ServerApp] Restoring connection for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:2d7338f8-121d-4935-82df-2529a1ba4f17
+[I 2026-02-09 17:38:32.693 ServerApp] Saving file at /lambda_analysis.ipynb
+[I 2026-02-09 17:40:28.171 ServerApp] Kernel restarted: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 17:40:28.177 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:2d7338f8-121d-4935-82df-2529a1ba4f17
+[I 2026-02-09 17:40:28.486 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:40:28.487 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:40:28.487 ServerApp] Restoring connection for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:2d7338f8-121d-4935-82df-2529a1ba4f17
+[I 2026-02-09 17:40:37.168 ServerApp] Saving file at /lambda_analysis.ipynb
+[I 2026-02-09 17:42:07.474 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:2d7338f8-121d-4935-82df-2529a1ba4f17
+[W 2026-02-09 17:42:19.039 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[W 2026-02-09 17:42:19.945 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 17:42:19.986 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:42:19.988 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:42:20.290 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:df1632e5-c294-47e9-b637-b6d93b58eb0a
+[I 2026-02-09 17:42:20.639 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:42:20.641 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:42:26.602 ServerApp] Kernel restarted: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 17:42:26.607 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:43473a6a-5a49-4880-8fff-802020b9670d
+[I 2026-02-09 17:42:26.923 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:42:26.924 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:42:26.924 ServerApp] Restoring connection for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:43473a6a-5a49-4880-8fff-802020b9670d
+[I 2026-02-09 17:44:20.095 ServerApp] Saving file at /lambda_analysis.ipynb
+[I 2026-02-09 17:51:51.770 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:43473a6a-5a49-4880-8fff-802020b9670d
+[W 2026-02-09 17:51:56.421 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[W 2026-02-09 17:51:57.447 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 17:51:57.493 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:51:57.496 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:51:57.793 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:5a7f017a-7e27-441e-9bfd-a6cf8e1b1415
+[I 2026-02-09 17:51:58.110 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:51:58.111 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:52:18.644 ServerApp] Kernel restarted: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 17:52:18.648 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:84d42a5d-5991-4ba5-b367-8ace9094ebfd
+[I 2026-02-09 17:52:18.965 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 17:52:18.966 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 17:52:18.966 ServerApp] Restoring connection for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:84d42a5d-5991-4ba5-b367-8ace9094ebfd
+[I 2026-02-09 17:53:57.633 ServerApp] Saving file at /lambda_analysis.ipynb
+[W 2026-02-09 18:02:36.496 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 18:02:44.432 ServerApp] Kernel restarted: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 18:02:44.437 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:84d42a5d-5991-4ba5-b367-8ace9094ebfd
+[I 2026-02-09 18:02:44.757 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:02:44.758 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:02:44.758 ServerApp] Restoring connection for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:84d42a5d-5991-4ba5-b367-8ace9094ebfd
+[I 2026-02-09 18:16:44.879 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:84d42a5d-5991-4ba5-b367-8ace9094ebfd
+[E 2026-02-09 18:16:44.881 ServerApp] 
+[I 2026-02-09 18:17:00.548 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:17:00.549 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:17:00.635 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:7b789639-4808-40d5-8f84-215033827ebc
+[W 2026-02-09 18:17:09.240 ServerApp] Notebook lambda_analysis_executed.ipynb is not trusted
+[W 2026-02-09 18:17:10.279 ServerApp] Notebook lambda_analysis_executed.ipynb is not trusted
+[I 2026-02-09 18:17:10.325 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:17:10.332 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:17:11.072 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:86207797-afce-432e-b122-fee9f84867d0
+[I 2026-02-09 18:17:11.241 ServerApp] Kernel started: 5d17424a-d6b5-46ca-86ce-af2e4e0228d4
+[I 2026-02-09 18:17:11.898 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:17:11.899 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[I 2026-02-09 18:17:20.566 ServerApp] Kernel restarted: 5d17424a-d6b5-46ca-86ce-af2e4e0228d4
+[I 2026-02-09 18:17:20.571 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:ab951761-473b-4a86-b3f8-4120a69aafc8
+[I 2026-02-09 18:17:20.891 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:17:20.892 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[I 2026-02-09 18:17:20.892 ServerApp] Restoring connection for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:ab951761-473b-4a86-b3f8-4120a69aafc8
+[I 2026-02-09 18:19:10.879 ServerApp] Saving file at /lambda_analysis_executed.ipynb
+[I 2026-02-09 18:25:55.686 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:ab951761-473b-4a86-b3f8-4120a69aafc8
+[W 2026-02-09 18:25:58.562 ServerApp] Notebook lambda_analysis_executed.ipynb is not trusted
+[I 2026-02-09 18:26:00.022 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:26:00.026 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:26:00.067 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[W 2026-02-09 18:26:00.182 ServerApp] Notebook lambda_analysis_executed.ipynb is not trusted
+[I 2026-02-09 18:26:00.193 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[I 2026-02-09 18:26:00.913 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:81d7270a-6d09-4c52-9911-0ab1b2d78746
+[I 2026-02-09 18:26:00.935 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:c99bdf44-3d5b-4eb4-ad9f-8530f112bac2
+[I 2026-02-09 18:26:01.267 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:26:01.268 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[I 2026-02-09 18:26:05.586 ServerApp] Kernel restarted: 5d17424a-d6b5-46ca-86ce-af2e4e0228d4
+[I 2026-02-09 18:26:05.590 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:b15936d7-348b-4c4b-82e8-c20b8a06da1a
+[I 2026-02-09 18:26:05.909 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:26:05.910 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[I 2026-02-09 18:26:05.910 ServerApp] Restoring connection for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:b15936d7-348b-4c4b-82e8-c20b8a06da1a
+[I 2026-02-09 18:28:00.742 ServerApp] Saving file at /lambda_analysis_executed.ipynb
+[I 2026-02-09 18:29:22.070 ServerApp] Kernel restarted: 5d17424a-d6b5-46ca-86ce-af2e4e0228d4
+[I 2026-02-09 18:29:22.079 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:b15936d7-348b-4c4b-82e8-c20b8a06da1a
+[I 2026-02-09 18:29:22.391 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:29:22.391 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[I 2026-02-09 18:29:22.392 ServerApp] Restoring connection for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:b15936d7-348b-4c4b-82e8-c20b8a06da1a
+[I 2026-02-09 18:30:00.885 ServerApp] Saving file at /lambda_analysis_executed.ipynb
+[W 2026-02-09 18:40:02.871 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 18:40:04.267 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:40:04.275 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:40:04.299 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:40:04.308 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[W 2026-02-09 18:40:04.410 ServerApp] Notebook lambda_analysis.ipynb is not trusted
+[I 2026-02-09 18:40:04.801 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:5413eead-7cd4-4eb8-b4e2-9e694d5cc49d
+[I 2026-02-09 18:40:05.164 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:40:05.165 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:40:12.811 ServerApp] Kernel restarted: 855a31c4-4fda-494f-b8bd-96c3c1889ca7
+[I 2026-02-09 18:40:12.816 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:063903fe-ec8c-4651-94ee-f40e4b2321bf
+[I 2026-02-09 18:40:13.134 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:40:13.135 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:40:13.135 ServerApp] Restoring connection for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:063903fe-ec8c-4651-94ee-f40e4b2321bf
+[I 2026-02-09 18:40:18.336 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:063903fe-ec8c-4651-94ee-f40e4b2321bf
+[I 2026-02-09 18:40:19.935 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:b15936d7-348b-4c4b-82e8-c20b8a06da1a
+[W 2026-02-09 18:40:22.856 ServerApp] Notebook lambda_analysis_executed.ipynb is not trusted
+[I 2026-02-09 18:40:23.646 ServerApp] Adapting from protocol version 5.3 (kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7) to 5.4 (client).
+[I 2026-02-09 18:40:23.648 ServerApp] Connecting to kernel 855a31c4-4fda-494f-b8bd-96c3c1889ca7.
+[I 2026-02-09 18:40:23.690 ServerApp] Discarding 54 buffered messages for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:063903fe-ec8c-4651-94ee-f40e4b2321bf
+[I 2026-02-09 18:40:23.732 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:40:23.759 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
+[W 2026-02-09 18:40:24.138 ServerApp] Notebook lambda_analysis_executed.ipynb is not trusted
+[I 2026-02-09 18:40:24.827 ServerApp] Starting buffering for 855a31c4-4fda-494f-b8bd-96c3c1889ca7:196cf763-2f50-4dae-a46f-dfc0f8a31446
+[I 2026-02-09 18:40:24.845 ServerApp] Starting buffering for 5d17424a-d6b5-46ca-86ce-af2e4e0228d4:96e8e40d-0777-47af-9f9f-210942930578
+[I 2026-02-09 18:40:25.163 ServerApp] Adapting from protocol version 5.3 (kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4) to 5.4 (client).
+[I 2026-02-09 18:40:25.164 ServerApp] Connecting to kernel 5d17424a-d6b5-46ca-86ce-af2e4e0228d4.
