@@ -2923,6 +2923,36 @@ def lambda_handler(event, context):
         # Prepare data for duration analysis (matching Jupyter notebook Section 6)
         durations = [float(item.get('duration_ms', 0)) for item in stats if item.get('duration_ms', 0) > 0]
 
+        # Calculate log-spaced bins for histogram (matching notebook exactly)
+        import math
+        histogram_data = {'bin_edges': [], 'counts': []}
+        if durations:
+            min_duration = min(durations)
+            max_duration = max(durations)
+
+            # Create 50 log-spaced bins using logspace formula: 10^(log10(min) + i*(log10(max)-log10(min))/n)
+            num_bins = 50
+            log_min = math.log10(min_duration)
+            log_max = math.log10(max_duration)
+            log_bins = [10**(log_min + i * (log_max - log_min) / num_bins) for i in range(num_bins + 1)]
+
+            # Calculate histogram
+            bin_counts = [0] * num_bins
+            for duration in durations:
+                # Find which bin this duration belongs to
+                for i in range(num_bins):
+                    if log_bins[i] <= duration < log_bins[i+1]:
+                        bin_counts[i] += 1
+                        break
+                else:
+                    # Handle edge case: duration == max_duration
+                    if duration == max_duration:
+                        bin_counts[-1] += 1
+
+            # Prepare data for Plotly (use bin centers)
+            histogram_data['bin_edges'] = [(log_bins[i] + log_bins[i+1]) / 2 for i in range(num_bins)]
+            histogram_data['counts'] = bin_counts
+
         # Prepare boxplot data by path (top 5 paths)
         path_durations = defaultdict(list)
         for item in stats:
@@ -3283,22 +3313,23 @@ def lambda_handler(event, context):
 
         html += '''
         <script>
-        // Duration histogram data (log scale, matching Jupyter notebook)
-        const durations = ''' + str(durations) + ''';
+        // Duration histogram data with log-spaced bins (matching Jupyter notebook EXACTLY)
+        const histogramBinEdges = ''' + str(histogram_data['bin_edges']) + ''';
+        const histogramCounts = ''' + str(histogram_data['counts']) + ''';
 
         // Duration boxplot data
         const boxplotData = ''' + str(boxplot_data) + ''';
 
-        // Render duration histogram with Plotly
-        if (durations.length > 0) {
+        // Render duration histogram with Plotly (using pre-calculated log bins)
+        if (histogramBinEdges.length > 0) {
             const trace = {
-                x: durations,
-                type: 'histogram',
+                x: histogramBinEdges,
+                y: histogramCounts,
+                type: 'bar',
                 marker: {
                     color: '#4a9eff',
                     line: { color: '#1a1a1a', width: 1 }
                 },
-                nbinsx: 50,
                 name: 'Duration (ms)'
             };
 
@@ -3309,13 +3340,15 @@ def lambda_handler(event, context):
                 xaxis: {
                     title: 'Duration (ms)',
                     type: 'log',
-                    gridcolor: '#3a3a3a'
+                    gridcolor: '#3a3a3a',
+                    dtick: Math.log10(10)  // Major ticks at powers of 10
                 },
                 yaxis: {
                     title: 'Count',
                     gridcolor: '#3a3a3a'
                 },
-                margin: { l: 60, r: 30, t: 30, b: 60 }
+                margin: { l: 60, r: 30, t: 30, b: 60 },
+                bargap: 0.05
             };
 
             Plotly.newPlot('durationHistogram', [trace], layout, {responsive: true});
