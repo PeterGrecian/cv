@@ -2578,1001 +2578,109 @@ def lambda_handler(event, context):
             html += '<title>Garden Camera</title><h1>Garden Camera</h1><p>No images available yet.</p>'
 
     elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
-        # Lambda execution statistics page
-        stats = get_lambda_execution_stats(limit=5000)
-
-        # Aggregate data by day
-        from collections import defaultdict
-        from decimal import Decimal
-        from datetime import datetime, timedelta
-
-        daily_stats = defaultdict(lambda: {
-            'count': 0,
-            'total_duration_ms': Decimal('0'),
-            'total_cost_usd': Decimal('0'),
-            'paths': defaultdict(int),
-            'gb_seconds': Decimal('0')
-        })
-
-        # Track all unique paths for the stacked chart
-        all_paths = set()
-
-        for item in stats:
-            ts = item.get('timestamp', '')
-            if ts:
-                date = ts.split('T')[0]  # Get just the date part
-                daily_stats[date]['count'] += 1
-                daily_stats[date]['total_duration_ms'] += Decimal(str(item.get('duration_ms', 0)))
-                daily_stats[date]['total_cost_usd'] += Decimal(str(item.get('estimated_cost_usd', 0)))
-                path_item = item.get('path', 'unknown')
-                daily_stats[date]['paths'][path_item] += 1
-                all_paths.add(path_item)
-
-                # Calculate GB-seconds for free tier tracking
-                memory_gb = Decimal(str(item.get('memory_limit_mb', 512))) / Decimal('1024')
-                duration_seconds = Decimal(str(item.get('duration_ms', 0))) / Decimal('1000')
-                daily_stats[date]['gb_seconds'] += memory_gb * duration_seconds
-
-        # Sort by date
-        sorted_dates = sorted(daily_stats.keys(), reverse=True)
-
-        # Prepare chart data - last 10 CALENDAR days from today
-        chart_dates = []
-        chart_counts = []
-        chart_durations = []
-        chart_costs = []
-        chart_path_data = defaultdict(list)
-
-        # Get last 10 calendar days
-        today = datetime.utcnow().date()
-        last_10_days = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(9, -1, -1)]
-
-        for date in last_10_days:
-            chart_dates.append(date)
-            if date in daily_stats:
-                chart_counts.append(daily_stats[date]['count'])
-                chart_durations.append(float(daily_stats[date]['total_duration_ms']))
-                chart_costs.append(float(daily_stats[date]['total_cost_usd']) * 1_000_000)
-
-                # Collect path counts for stacked chart
-                for path_name in all_paths:
-                    chart_path_data[path_name].append(daily_stats[date]['paths'].get(path_name, 0))
-            else:
-                # No data for this day - fill with zeros
-                chart_counts.append(0)
-                chart_durations.append(0)
-                chart_costs.append(0)
-                for path_name in all_paths:
-                    chart_path_data[path_name].append(0)
-
-        total_executions = sum(d['count'] for d in daily_stats.values())
-        total_cost = sum(d['total_cost_usd'] for d in daily_stats.values())
-        total_duration = sum(d['total_duration_ms'] for d in daily_stats.values())
-        total_gb_seconds = sum(d['gb_seconds'] for d in daily_stats.values())
-
-        # Calculate current month stats for free tier tracking
-        today = datetime.utcnow()
-        month_start = today.replace(day=1).strftime('%Y-%m-%d')
-        current_month_stats = {
-            'requests': 0,
-            'gb_seconds': Decimal('0'),
-            'cost': Decimal('0')
-        }
-
-        for date_str, data in daily_stats.items():
-            if date_str >= month_start:
-                current_month_stats['requests'] += data['count']
-                current_month_stats['gb_seconds'] += data['gb_seconds']
-                current_month_stats['cost'] += data['total_cost_usd']
-
-        # AWS Lambda Free Tier limits (monthly)
-        FREE_TIER_REQUESTS = 1_000_000
-        FREE_TIER_GB_SECONDS = 400_000
-
-        # Calculate usage percentages
-        request_usage_pct = (current_month_stats['requests'] / FREE_TIER_REQUESTS) * 100
-        gb_seconds_usage_pct = (float(current_month_stats['gb_seconds']) / FREE_TIER_GB_SECONDS) * 100
-
-        # Calculate costs if free tier was exceeded
-        excess_requests = max(0, current_month_stats['requests'] - FREE_TIER_REQUESTS)
-        excess_gb_seconds = max(0, float(current_month_stats['gb_seconds']) - FREE_TIER_GB_SECONDS)
-
-        excess_request_cost = (excess_requests / 1_000_000) * 0.20
-        excess_compute_cost = excess_gb_seconds * 0.0000166667
-        total_excess_cost = excess_request_cost + excess_compute_cost
-
-        # Monthly projection (days elapsed in month)
-        days_in_month = (today.replace(month=today.month % 12 + 1, day=1) if today.month < 12
-                         else today.replace(year=today.year + 1, month=1, day=1)) - today.replace(day=1)
-        days_elapsed = today.day
-        projection_multiplier = days_in_month.days / days_elapsed if days_elapsed > 0 else 1
-
-        projected_requests = int(current_month_stats['requests'] * projection_multiplier)
-        projected_gb_seconds = float(current_month_stats['gb_seconds']) * projection_multiplier
-        projected_cost = float(current_month_stats['cost']) * projection_multiplier
-
-        # Calculate top paths by total count
-        path_totals = defaultdict(int)
-        for data in daily_stats.values():
-            for path_name, count in data['paths'].items():
-                path_totals[path_name] += count
-
-        top_paths = sorted(path_totals.items(), key=lambda x: x[1], reverse=True)[:10]
-
-        # Get CloudWatch metrics for all Lambda functions
+        # Minimal Lambda statistics - CloudWatch metrics only
         all_lambda_metrics = get_all_lambda_metrics(days=30)
-
-        # Calculate aggregated CloudWatch stats across all functions
+        
+        # Calculate aggregated stats
         total_cw_invocations = sum(m['invocations'] for m in all_lambda_metrics.values())
         total_cw_errors = sum(m['errors'] for m in all_lambda_metrics.values())
         total_cw_throttles = sum(m['throttles'] for m in all_lambda_metrics.values())
-
+        
         # Calculate weighted average duration
         total_duration_weighted = sum(m['avg_duration'] * m['invocations'] for m in all_lambda_metrics.values())
         avg_cw_duration = total_duration_weighted / total_cw_invocations if total_cw_invocations > 0 else 0
         max_cw_duration = max((m['max_duration'] for m in all_lambda_metrics.values()), default=0)
-
+        
         error_rate = (total_cw_errors / total_cw_invocations * 100) if total_cw_invocations > 0 else 0
-
+        
         # Sort functions by invocation count
         sorted_functions = sorted(all_lambda_metrics.items(), key=lambda x: x[1]['invocations'], reverse=True)
-
-        # Calculate stats by application
-        app_stats = defaultdict(lambda: {
-            'count': 0,
-            'total_duration_ms': Decimal('0'),
-            'total_cost_usd': Decimal('0')
-        })
-
-        for item in stats:
-            path = item.get('path', '')
-            app = categorize_path(path)
-            app_stats[app]['count'] += 1
-            app_stats[app]['total_duration_ms'] += Decimal(str(item.get('duration_ms', 0)))
-            app_stats[app]['total_cost_usd'] += Decimal(str(item.get('estimated_cost_usd', 0)))
-
-        # Sort apps by count
-        sorted_apps = sorted(app_stats.items(), key=lambda x: x[1]['count'], reverse=True)
-
-        # Determine free tier status color
-        free_tier_status = 'good' if request_usage_pct < 50 else ('warning' if request_usage_pct < 80 else 'danger')
-        status_colors = {'good': '#32cd32', 'warning': '#ffa500', 'danger': '#ff4444'}
-
+        
         html += f'''
         <!DOCTYPE html>
         <html lang="en">
         <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Lambda Execution Statistics</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-        <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+        <title>Lambda CloudWatch Metrics</title>
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
-            .nav {{ text-align: center; margin-bottom: 1.5rem; }}
-            .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
-            .nav a:hover {{ background: #3a3a3a; }}
-            h1 {{ text-align: center; margin-bottom: 2rem; }}
-            .chart-container {{ max-width: 1400px; margin: 0 auto 3rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
-            .chart-title {{ font-size: 1.2rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
-            canvas {{ max-height: 400px; }}
-            .stats-summary {{ max-width: 1400px; margin: 0 auto 2rem auto; padding: 1rem; background: #2a2a2a; border-radius: 8px; }}
-            .stats-summary h2 {{ margin-top: 0; color: #aaa; }}
-            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }}
-            .stat-box {{ background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }}
-            .stat-value {{ font-size: 2rem; font-weight: bold; color: #4a9eff; }}
-            .stat-label {{ color: #888; margin-top: 0.5rem; }}
-            .daily-table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
-            .daily-table th, .daily-table td {{ padding: 0.5rem; text-align: left; border-bottom: 1px solid #3a3a3a; }}
-            .daily-table th {{ color: #aaa; background: #1a1a1a; }}
-            .free-tier-box {{ background: #1a1a1a; padding: 1.5rem; border-radius: 6px; border-left: 4px solid {status_colors[free_tier_status]}; }}
-            .progress-bar {{ background: #3a3a3a; height: 20px; border-radius: 10px; overflow: hidden; margin: 0.5rem 0; }}
-            .progress-fill {{ height: 100%; transition: width 0.3s; }}
-            .metric-row {{ display: flex; justify-content: space-between; align-items: center; margin: 1rem 0; }}
-            .metric-name {{ color: #aaa; }}
-            .metric-value {{ color: #fff; font-weight: bold; }}
-            .projection {{ background: #252525; padding: 1rem; border-radius: 6px; margin-top: 1rem; }}
-            .projection-label {{ color: #888; font-size: 0.9rem; }}
-            .projection-value {{ color: #ffa500; font-size: 1.3rem; font-weight: bold; }}
+            body {{ font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }}
+            h1 {{ color: #333; }}
+            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+            table {{ width: 100%; border-collapse: collapse; margin: 2rem 0; }}
+            th, td {{ padding: 0.75rem; text-align: left; border-bottom: 1px solid #ddd; }}
+            th {{ background: #667eea; color: white; font-weight: 600; }}
+            tr:hover {{ background: #f8f9fa; }}
+            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }}
+            .stat-box {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 8px; text-align: center; color: white; }}
+            .stat-value {{ font-size: 2rem; font-weight: bold; }}
+            .stat-label {{ margin-top: 0.5rem; opacity: 0.9; }}
+            .nav {{ text-align: center; margin-bottom: 2rem; }}
+            .nav a {{ color: #667eea; text-decoration: none; padding: 0.5rem 1rem; background: #f0f0f0; border-radius: 4px; }}
         </style>
         </head>
         <body>
-        <div class="nav">
-            <a href="../contents">Home</a>
-        </div>
-        <h1>Lambda Execution Statistics</h1>
-
-        <div class="stats-summary">
-            <h2>AWS Free Tier Usage (Current Month - DynamoDB Logs Only)</h2>
-            <div class="free-tier-box">
-                <div class="metric-row">
-                    <span class="metric-name">Requests Logged</span>
-                    <span class="metric-value">{current_month_stats['requests']:,} / {FREE_TIER_REQUESTS:,} ({request_usage_pct:.2f}%)</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {min(request_usage_pct, 100):.1f}%; background: {status_colors[free_tier_status]};"></div>
-                </div>
-
-                <div class="metric-row" style="margin-top: 1.5rem;">
-                    <span class="metric-name">Compute (GB-seconds)</span>
-                    <span class="metric-value">{float(current_month_stats['gb_seconds']):,.1f} / {FREE_TIER_GB_SECONDS:,} ({gb_seconds_usage_pct:.2f}%)</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {min(gb_seconds_usage_pct, 100):.1f}%; background: {status_colors[free_tier_status]};"></div>
-                </div>
-
-                <div style="margin-top: 1rem; padding: 0.75rem; background: #1a3a1a; border-radius: 6px; border-left: 3px solid #32cd32;">
-                    <div style="font-size: 0.9rem; color: #aaa;">
-                        <strong style="color: #32cd32;">✓ Free tier will not be exceeded</strong><br>
-                        All costs shown are theoretical - actual cost this month: <strong>$0.00</strong>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="stats-summary">
-            <h2>🔍 Data Availability Check</h2>
-            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
-                Showing which dates have execution data in DynamoDB
-            </div>
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Executions</th>
-                        <th>In Last 10 Days?</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        # Show last 30 dates to help debug
-        today = datetime.utcnow().date()
-        last_30_days = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(29, -1, -1)]
-
-        for date in last_30_days:
-            if date in daily_stats:
-                count = daily_stats[date]['count']
-                in_range = "✓ Yes" if date in chart_dates else "No"
-                html += f'''
-                    <tr style="{'background: #1a3a1a;' if date in chart_dates else ''}">
-                        <td><strong>{date}</strong></td>
-                        <td>{count:,}</td>
-                        <td>{in_range}</td>
-                    </tr>
-                '''
-
-        html += '''
-                </tbody>
-            </table>
-        </div>
-
-        <div class="stats-summary">
-            <h2>📊 Historical CloudWatch Metrics (All Functions - Last 30 Days)</h2>
-            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem; text-align: center;">
-                Includes all Lambda invocations from CloudWatch monitoring
-            </div>
+        <div class="container">
+            <div class="nav"><a href="../contents">← Home</a></div>
+            <h1>📊 Lambda CloudWatch Metrics (Last 30 Days)</h1>
+            
             <div class="stats-grid">
                 <div class="stat-box">
                     <div class="stat-value">{int(total_cw_invocations):,}</div>
                     <div class="stat-label">Total Invocations</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value" style="color: {'#ff4444' if total_cw_errors > 0 else '#32cd32'};">{int(total_cw_errors):,}</div>
+                    <div class="stat-value">{int(total_cw_errors):,}</div>
                     <div class="stat-label">Errors</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value" style="color: {'#ff4444' if total_cw_throttles > 0 else '#32cd32'};">{int(total_cw_throttles):,}</div>
+                    <div class="stat-value">{int(total_cw_throttles):,}</div>
                     <div class="stat-label">Throttles</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value" style="color: {'#ff4444' if error_rate > 5 else ('#ffa500' if error_rate > 1 else '#32cd32')};">{error_rate:.2f}%</div>
+                    <div class="stat-value">{error_rate:.2f}%</div>
                     <div class="stat-label">Error Rate</div>
                 </div>
                 <div class="stat-box">
                     <div class="stat-value">{avg_cw_duration:.0f}ms</div>
-                    <div class="stat-label">Avg Duration (CW)</div>
+                    <div class="stat-label">Avg Duration</div>
                 </div>
                 <div class="stat-box">
                     <div class="stat-value">{max_cw_duration:.0f}ms</div>
-                    <div class="stat-label">Max Duration (CW)</div>
+                    <div class="stat-label">Max Duration</div>
                 </div>
             </div>
-        </div>
-
-        <div class="stats-summary">
-            <h2>Statistics by Lambda Function (Last 30 Days)</h2>
-            <table class="daily-table">
+            
+            <h2>Functions by Invocation Count</h2>
+            <table>
                 <thead>
                     <tr>
                         <th>Function Name</th>
                         <th>Invocations</th>
                         <th>Errors</th>
                         <th>Error Rate</th>
-                        <th>Avg Duration</th>
-                        <th>Max Duration</th>
+                        <th>Avg Duration (ms)</th>
+                        <th>Max Duration (ms)</th>
                     </tr>
                 </thead>
                 <tbody>
         '''
-
+        
         for func_name, func_metrics in sorted_functions:
-            func_invocations = int(func_metrics['invocations'])
-            func_errors = int(func_metrics['errors'])
-            func_error_rate = func_metrics['error_rate']
-            func_avg_duration = func_metrics['avg_duration']
-            func_max_duration = func_metrics['max_duration']
-
-            error_color = '#ff4444' if func_error_rate > 5 else ('#ffa500' if func_error_rate > 1 else '#32cd32')
-
             html += f'''
                     <tr>
                         <td><strong>{func_name}</strong></td>
-                        <td>{func_invocations:,}</td>
-                        <td style="color: {error_color};">{func_errors:,}</td>
-                        <td style="color: {error_color};">{func_error_rate:.2f}%</td>
-                        <td>{func_avg_duration:.0f}ms</td>
-                        <td>{func_max_duration:.0f}ms</td>
+                        <td>{int(func_metrics['invocations']):,}</td>
+                        <td>{int(func_metrics['errors']):,}</td>
+                        <td>{func_metrics['error_rate']:.2f}%</td>
+                        <td>{func_metrics['avg_duration']:.0f}</td>
+                        <td>{func_metrics['max_duration']:.0f}</td>
                     </tr>
             '''
-
+        
         html += '''
                 </tbody>
             </table>
         </div>
-
-        <div class="stats-summary">
-            <h2>Statistics by Application (Recent DynamoDB Logs)</h2>
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>Application</th>
-                        <th>Requests</th>
-                        <th>Avg Duration</th>
-                        <th>Cost (µ$)</th>
-                        <th>Percentage</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        for app_name, app_data in sorted_apps:
-            app_count = app_data['count']
-            app_avg_duration = float(app_data['total_duration_ms']) / app_count if app_count > 0 else 0
-            app_cost_microdollars = float(app_data['total_cost_usd']) * 1_000_000
-            app_percentage = (app_count / total_executions * 100) if total_executions > 0 else 0
-
-            html += f'''
-                    <tr>
-                        <td><strong>{app_name}</strong></td>
-                        <td>{app_count:,}</td>
-                        <td>{app_avg_duration:.0f}ms</td>
-                        <td>{app_cost_microdollars:.2f}</td>
-                        <td>{app_percentage:.1f}%</td>
-                    </tr>
-            '''
-
-        html += f'''
-                </tbody>
-            </table>
-        </div>
-
-        <div class="stats-summary">
-            <h2>📝 Recent Execution Logs from DynamoDB ({len(stats)} executions)</h2>
-            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem; text-align: center;">
-                Detailed logs since execution logging was enabled (~1 hour ago)
-            </div>
-            <div class="stats-grid">
-                <div class="stat-box">
-                    <div class="stat-value">{total_executions:,}</div>
-                    <div class="stat-label">Total Executions Logged</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{float(total_cost)*1_000_000:.1f} µ$</div>
-                    <div class="stat-label">Total Cost (microdollars)<br><span style="font-size: 0.8rem; color: #666;">After free tier</span></div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{float(total_duration)/1000:.1f}s</div>
-                    <div class="stat-label">Total Runtime</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{float(total_duration)/total_executions if total_executions > 0 else 0:.0f}ms</div>
-                    <div class="stat-label">Avg Duration</div>
-                </div>
-            </div>
-        </div>
-        '''
-
-        # Prepare data for duration analysis (matching Jupyter notebook Section 6)
-        durations = [float(item.get('duration_ms', 0)) for item in stats if item.get('duration_ms', 0) > 0]
-
-        # Calculate log-spaced bins for histogram (matching notebook exactly)
-        import math
-        histogram_data = {'bin_edges': [], 'counts': []}
-        if durations:
-            min_duration = min(durations)
-            max_duration = max(durations)
-
-            # Create 50 log-spaced bins using logspace formula: 10^(log10(min) + i*(log10(max)-log10(min))/n)
-            num_bins = 50
-            log_min = math.log10(min_duration)
-            log_max = math.log10(max_duration)
-            log_bins = [10**(log_min + i * (log_max - log_min) / num_bins) for i in range(num_bins + 1)]
-
-            # Calculate histogram
-            bin_counts = [0] * num_bins
-            for duration in durations:
-                # Find which bin this duration belongs to
-                for i in range(num_bins):
-                    if log_bins[i] <= duration < log_bins[i+1]:
-                        bin_counts[i] += 1
-                        break
-                else:
-                    # Handle edge case: duration == max_duration
-                    if duration == max_duration:
-                        bin_counts[-1] += 1
-
-            # Prepare data for Plotly (use bin centers)
-            histogram_data['bin_edges'] = [(log_bins[i] + log_bins[i+1]) / 2 for i in range(num_bins)]
-            histogram_data['counts'] = bin_counts
-
-        # Prepare boxplot data by path (top 5 paths)
-        path_durations = defaultdict(list)
-        for item in stats:
-            path = item.get('path', '')
-            if path:  # Only non-empty paths
-                duration = float(item.get('duration_ms', 0))
-                if duration > 0:
-                    path_durations[path].append(duration)
-
-        # Get top 5 paths by count
-        top_5_paths = sorted(path_totals.items(), key=lambda x: x[1], reverse=True)[:5]
-        top_5_path_names = [p[0] for p in top_5_paths if p[0]]  # Exclude empty paths
-
-        # Prepare boxplot data
-        boxplot_data = []
-        colors = ['#4a9eff', '#32cd32', '#ffa500', '#ff69b4', '#9370db']
-        for idx, path_name in enumerate(top_5_path_names):
-            if path_name in path_durations:
-                boxplot_data.append({
-                    'y': path_durations[path_name],
-                    'name': path_name,
-                    'type': 'box',
-                    'marker': {'color': colors[idx % len(colors)]}
-                })
-
-        html += f'''
-        <div class="chart-container">
-            <div class="chart-title">📊 Duration Distribution (Log Scale)</div>
-            <div style="font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 1rem;">
-                Similar to Jupyter notebook analysis - log-scaled bins for better visualization
-            </div>
-            <div id="durationHistogram" style="width: 100%; height: 400px;"></div>
-        </div>
-
-        <div class="chart-container">
-            <div class="chart-title">📦 Duration by Path (Top 5)</div>
-            <div style="font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 1rem;">
-                Boxplots showing duration distribution for each endpoint
-            </div>
-            <div id="durationBoxplot" style="width: 100%; height: 400px;"></div>
-        </div>
-
-        <div class="chart-container">
-            <div class="chart-title">Executions by Endpoint (Last 10 Days)</div>
-            <canvas id="pathChart"></canvas>
-        </div>
-
-        <div class="chart-container">
-            <div class="chart-title">Daily Execution Count (Last 10 Days)</div>
-            <canvas id="countChart"></canvas>
-        </div>
-
-        <div class="chart-container">
-            <div class="chart-title">Daily Total Duration (Last 10 Days)</div>
-            <canvas id="durationChart"></canvas>
-        </div>
-
-        <div class="chart-container">
-            <div class="chart-title">Daily Cost in Microdollars (µ$) - Last 10 Days</div>
-            <canvas id="costChart"></canvas>
-        </div>
-
-        <div class="stats-summary">
-            <h2>Top Endpoints by Request Count</h2>
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>Endpoint</th>
-                        <th>Total Requests</th>
-                        <th>Percentage</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        for path_name, count in top_paths:
-            percentage = (count / total_executions * 100) if total_executions > 0 else 0
-            html += f'''
-                    <tr>
-                        <td>{path_name if path_name else '(root)'}</td>
-                        <td>{count:,}</td>
-                        <td>{percentage:.1f}%</td>
-                    </tr>
-            '''
-
-        html += '''
-                </tbody>
-            </table>
-        </div>
-
-        <div class="stats-summary">
-            <h2>Daily Breakdown (Recent DynamoDB Logs)</h2>
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Executions</th>
-                        <th>Total Duration</th>
-                        <th>Avg Duration</th>
-                        <th>Cost (µ$)</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        for date in sorted_dates[:30]:  # Show last 30 days
-            day_data = daily_stats[date]
-            avg_duration = float(day_data['total_duration_ms']) / day_data['count'] if day_data['count'] > 0 else 0
-            cost_microdollars = float(day_data['total_cost_usd']) * 1_000_000
-            html += f'''
-                    <tr>
-                        <td>{date}</td>
-                        <td>{day_data['count']:,}</td>
-                        <td>{float(day_data['total_duration_ms'])/1000:.1f}s</td>
-                        <td>{avg_duration:.0f}ms</td>
-                        <td>{cost_microdollars:.2f}</td>
-                    </tr>
-            '''
-
-        html += '''
-                </tbody>
-            </table>
-        </div>
-        '''
-
-        # IP Address and User-Agent Analysis
-        from collections import Counter
-
-        ip_data = defaultdict(lambda: {'count': 0, 'paths': Counter(), 'timestamps': [], 'user_agents': Counter()})
-        ua_data = Counter()
-
-        for item in stats:
-            ip = item.get('ip_address', 'Unknown')
-            ua = item.get('user_agent', 'Unknown')
-            path = item.get('path', 'unknown')
-            timestamp = item.get('timestamp', '')
-
-            if ip and ip != 'Unknown':
-                ip_data[ip]['count'] += 1
-                ip_data[ip]['paths'][path] += 1
-                ip_data[ip]['user_agents'][ua] += 1
-                if timestamp:
-                    try:
-                        ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                        ip_data[ip]['timestamps'].append(ts)
-                    except:
-                        pass
-
-            if ua and ua != 'Unknown':
-                ua_data[ua] += 1
-
-        # Detect automated patterns
-        ip_patterns = []
-        for ip, data in ip_data.items():
-            if len(data['timestamps']) > 1:
-                timestamps = sorted(data['timestamps'])
-                intervals = [(timestamps[i+1] - timestamps[i]).total_seconds() / 60 for i in range(len(timestamps)-1)]
-                if intervals:
-                    avg_interval = sum(intervals) / len(intervals)
-                    if avg_interval < 30:  # Less than 30 minutes average
-                        top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
-                        top_ua = data['user_agents'].most_common(1)[0] if data['user_agents'] else ('Unknown', 0)
-                        ip_patterns.append({
-                            'ip': ip,
-                            'count': data['count'],
-                            'avg_interval': avg_interval,
-                            'top_path': top_path[0],
-                            'top_ua': top_ua[0]
-                        })
-
-        # Sort by count
-        top_ips = sorted(ip_data.items(), key=lambda x: x[1]['count'], reverse=True)[:20]
-        top_uas = ua_data.most_common(20)
-        sorted_patterns = sorted(ip_patterns, key=lambda x: x['avg_interval'])
-
-        # Get geolocation for top IPs
-        import time as time_module
-        ip_geo_data = []
-        country_counts = Counter()
-
-        for ip, data in top_ips[:15]:  # Limit to 15 to avoid rate limiting
-            time_module.sleep(0.15)  # Rate limit: ~6 requests/second
-            geo = get_ip_geolocation(ip)
-            ip_geo_data.append({
-                'ip': ip,
-                'count': data['count'],
-                'country': geo['country'],
-                'city': geo['city'],
-                'paths': data['paths'],
-                'user_agents': data['user_agents']
-            })
-            country_counts[geo['country']] += data['count']
-
-        html += f'''
-        <div class="stats-summary">
-            <h2>🌍 IP Address Analysis with Geolocation ({len(ip_data)} unique IPs)</h2>
-            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
-                Geographic distribution and top IP addresses
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
-                <div>
-                    <div class="chart-title">Top 10 IP Addresses</div>
-                    <div id="ipPieChart" style="height: 400px;"></div>
-                </div>
-                <div>
-                    <div class="chart-title">Requests by Country</div>
-                    <div id="countryPieChart" style="height: 400px;"></div>
-                </div>
-            </div>
-
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>IP Address</th>
-                        <th>Country</th>
-                        <th>City</th>
-                        <th>Requests</th>
-                        <th>Top Path</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        for ip_info in ip_geo_data:
-            top_path = ip_info['paths'].most_common(1)[0] if ip_info['paths'] else ('unknown', 0)
-            display_path = top_path[0] if top_path[0] else '(root)'
-
-            html += f'''
-                    <tr>
-                        <td><code>{ip_info['ip']}</code></td>
-                        <td>{ip_info['country']}</td>
-                        <td>{ip_info['city']}</td>
-                        <td>{ip_info['count']:,}</td>
-                        <td><code>{display_path}</code></td>
-                    </tr>
-            '''
-
-        html += '''
-                </tbody>
-            </table>
-        </div>
-
-        <div class="stats-summary">
-            <h2>📱 User-Agent Analysis</h2>
-            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
-                Showing top 20 browsers/devices by request count
-            </div>
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>User-Agent</th>
-                        <th>Requests</th>
-                        <th>Percentage</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        total_ua_requests = sum(ua_data.values())
-        for ua, count in top_uas:
-            percentage = (count / total_ua_requests * 100) if total_ua_requests > 0 else 0
-            ua_short = (ua[:100] + '...') if len(ua) > 100 else ua
-
-            html += f'''
-                    <tr>
-                        <td style="font-size: 0.85rem; word-break: break-all;">{ua_short}</td>
-                        <td>{count:,}</td>
-                        <td>{percentage:.1f}%</td>
-                    </tr>
-            '''
-
-        html += '''
-                </tbody>
-            </table>
-        </div>
-        '''
-
-        if sorted_patterns:
-            html += f'''
-        <div class="stats-summary">
-            <h2>🤖 Automated Request Detection</h2>
-            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
-                IPs making requests at regular intervals (< 30 min average)
-            </div>
-            <table class="daily-table">
-                <thead>
-                    <tr>
-                        <th>IP Address</th>
-                        <th>Requests</th>
-                        <th>Avg Interval</th>
-                        <th>Top Path</th>
-                        <th>User-Agent</th>
-                    </tr>
-                </thead>
-                <tbody>
-            '''
-
-            for pattern in sorted_patterns:
-                interval_str = f"{pattern['avg_interval']:.1f} min"
-                ua_short = (pattern['top_ua'][:60] + '...') if len(pattern['top_ua']) > 60 else pattern['top_ua']
-                warning_style = 'background: #3a1a1a; color: #ffa500;' if pattern['avg_interval'] < 5 else ''
-
-                html += f'''
-                    <tr style="{warning_style}">
-                        <td><code>{pattern['ip']}</code></td>
-                        <td>{pattern['count']:,}</td>
-                        <td><strong>{interval_str}</strong></td>
-                        <td>{pattern['top_path'] if pattern['top_path'] else '(root)'}</td>
-                        <td style="font-size: 0.85rem; color: #aaa;">{ua_short}</td>
-                    </tr>
-                '''
-
-            html += '''
-                </tbody>
-            </table>
-            <div style="margin-top: 1rem; padding: 1rem; background: #2a2a1a; border-left: 4px solid #ffa500; border-radius: 4px;">
-                <strong style="color: #ffa500;">⚠️ Note:</strong> Rows highlighted in orange indicate very frequent automated requests (< 5 min intervals).
-                These may be widgets, auto-refresh browsers, or cron jobs.
-            </div>
-        </div>
-            '''
-
-        html += '''
-        <script>
-        // Duration histogram data with log-spaced bins (matching Jupyter notebook EXACTLY)
-        const histogramBinEdges = ''' + str(histogram_data['bin_edges']) + ''';
-        const histogramCounts = ''' + str(histogram_data['counts']) + ''';
-
-        // Duration boxplot data
-        const boxplotData = ''' + str(boxplot_data) + ''';
-
-        // Render duration histogram with Plotly (using pre-calculated log bins)
-        if (histogramBinEdges.length > 0) {
-            const trace = {
-                x: histogramBinEdges,
-                y: histogramCounts,
-                type: 'bar',
-                marker: {
-                    color: '#4a9eff',
-                    line: { color: '#1a1a1a', width: 1 }
-                },
-                name: 'Duration (ms)'
-            };
-
-            const layout = {
-                paper_bgcolor: '#2a2a2a',
-                plot_bgcolor: '#1a1a1a',
-                font: { color: '#fff' },
-                xaxis: {
-                    title: 'Duration (ms)',
-                    type: 'log',
-                    gridcolor: '#3a3a3a',
-                    dtick: Math.log10(10)  // Major ticks at powers of 10
-                },
-                yaxis: {
-                    title: 'Count',
-                    gridcolor: '#3a3a3a'
-                },
-                margin: { l: 60, r: 30, t: 30, b: 60 },
-                bargap: 0.05
-            };
-
-            Plotly.newPlot('durationHistogram', [trace], layout, {responsive: true});
-        }
-
-        // Render boxplots with Plotly
-        if (boxplotData.length > 0) {
-            const layout = {
-                paper_bgcolor: '#2a2a2a',
-                plot_bgcolor: '#1a1a1a',
-                font: { color: '#fff' },
-                yaxis: {
-                    title: 'Duration (ms)',
-                    type: 'log',
-                    gridcolor: '#3a3a3a'
-                },
-                xaxis: {
-                    gridcolor: '#3a3a3a'
-                },
-                margin: { l: 60, r: 30, t: 30, b: 100 },
-                showlegend: false
-            };
-
-            Plotly.newPlot('durationBoxplot', boxplotData, layout, {responsive: true});
-        }
-
-        // IP Address Pie Chart
-        const ipLabels = ''' + str([ip_info['ip'] for ip_info in ip_geo_data[:10]]) + ''';
-        const ipValues = ''' + str([ip_info['count'] for ip_info in ip_geo_data[:10]]) + ''';
-
-        if (ipLabels.length > 0) {
-            Plotly.newPlot('ipPieChart', [{
-                labels: ipLabels,
-                values: ipValues,
-                type: 'pie',
-                textinfo: 'label+percent',
-                marker: {
-                    colors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
-                             '#1abc9c', '#34495e', '#16a085', '#27ae60', '#2980b9']
-                }
-            }], {
-                paper_bgcolor: '#2a2a2a',
-                plot_bgcolor: '#1a1a1a',
-                font: { color: '#fff', size: 11 },
-                margin: { l: 10, r: 10, t: 10, b: 10 },
-                showlegend: true,
-                legend: { font: { size: 10 } }
-            }, {responsive: true});
-        }
-
-        // Country Pie Chart
-        const countryLabels = ''' + str(list(country_counts.keys())) + ''';
-        const countryValues = ''' + str(list(country_counts.values())) + ''';
-
-        if (countryLabels.length > 0) {
-            Plotly.newPlot('countryPieChart', [{
-                labels: countryLabels,
-                values: countryValues,
-                type: 'pie',
-                textinfo: 'label+percent',
-                marker: {
-                    colors: ['#2ecc71', '#3498db', '#f39c12', '#e74c3c', '#9b59b6',
-                             '#1abc9c', '#34495e', '#16a085', '#27ae60', '#2980b9']
-                }
-            }], {
-                paper_bgcolor: '#2a2a2a',
-                plot_bgcolor: '#1a1a1a',
-                font: { color: '#fff', size: 12 },
-                margin: { l: 10, r: 10, t: 10, b: 10 },
-                showlegend: true
-            }, {responsive: true});
-        }
-
-        const chartDates = ''' + str(chart_dates) + ''';
-        const chartCounts = ''' + str(chart_counts) + ''';
-        const chartDurations = ''' + str([d/1000 for d in chart_durations]) + ''';
-        const chartCosts = ''' + str(chart_costs) + ''';
-
-        // Prepare path breakdown data
-        const pathNames = ''' + str(list(all_paths)[:10]) + ''';  // Top 10 paths
-        const pathData = ''' + str({k: v[:len(chart_dates)] if len(v) >= len(chart_dates) else v + [0]*(len(chart_dates)-len(v))
-                                     for k, v in list(chart_path_data.items())[:10]}) + ''';
-
-        // Generate colors for paths
-        const pathColors = [
-            '#4a9eff', '#32cd32', '#ffa500', '#ff69b4', '#9370db',
-            '#00ced1', '#ff6347', '#98fb98', '#dda0dd', '#f0e68c'
-        ];
-
-        // Path Breakdown Stacked Chart
-        const pathDatasets = pathNames.map((pathName, idx) => ({
-            label: pathName || '(root)',
-            data: pathData[pathName] || [],
-            backgroundColor: pathColors[idx % pathColors.length],
-            borderColor: pathColors[idx % pathColors.length],
-            borderWidth: 1
-        }));
-
-        new Chart(document.getElementById('pathChart'), {
-            type: 'bar',
-            data: {
-                labels: chartDates,
-                datasets: pathDatasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        labels: { color: '#fff' },
-                        position: 'bottom'
-                    }
-                },
-                scales: {
-                    x: {
-                        stacked: true,
-                        ticks: { color: '#aaa' },
-                        grid: { color: '#3a3a3a' }
-                    },
-                    y: {
-                        stacked: true,
-                        ticks: { color: '#aaa' },
-                        grid: { color: '#3a3a3a' }
-                    }
-                }
-            }
-        });
-
-        // Count Chart
-        new Chart(document.getElementById('countChart'), {
-            type: 'line',
-            data: {
-                labels: chartDates,
-                datasets: [{
-                    label: 'Executions',
-                    data: chartCounts,
-                    borderColor: '#4a9eff',
-                    backgroundColor: 'rgba(74, 158, 255, 0.1)',
-                    tension: 0.3
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: '#fff' } } },
-                scales: {
-                    x: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } },
-                    y: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } }
-                }
-            }
-        });
-
-        // Duration Chart
-        new Chart(document.getElementById('durationChart'), {
-            type: 'bar',
-            data: {
-                labels: chartDates,
-                datasets: [{
-                    label: 'Duration (seconds)',
-                    data: chartDurations,
-                    backgroundColor: '#6a5acd',
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: '#fff' } } },
-                scales: {
-                    x: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } },
-                    y: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } }
-                }
-            }
-        });
-
-        // Cost Chart
-        new Chart(document.getElementById('costChart'), {
-            type: 'bar',
-            data: {
-                labels: chartDates,
-                datasets: [{
-                    label: 'Cost (µ$ - microdollars)',
-                    data: chartCosts,
-                    backgroundColor: '#32cd32',
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { labels: { color: '#fff' } } },
-                scales: {
-                    x: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } },
-                    y: { ticks: { color: '#aaa' }, grid: { color: '#3a3a3a' } }
-                }
-            }
-        });
-        </script>
         </body>
         </html>
         '''
