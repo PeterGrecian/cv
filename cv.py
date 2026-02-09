@@ -2692,6 +2692,7 @@ def lambda_handler(event, context):
         html += f'''
         <title>Lambda Execution Statistics</title>
         <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+        <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
             .nav {{ text-align: center; margin-bottom: 1.5rem; }}
@@ -2886,6 +2887,52 @@ def lambda_handler(event, context):
                     <div class="stat-label">Avg Duration</div>
                 </div>
             </div>
+        </div>
+        '''
+
+        # Prepare data for duration analysis (matching Jupyter notebook Section 6)
+        durations = [float(item.get('duration_ms', 0)) for item in stats if item.get('duration_ms', 0) > 0]
+
+        # Prepare boxplot data by path (top 5 paths)
+        path_durations = defaultdict(list)
+        for item in stats:
+            path = item.get('path', '')
+            if path:  # Only non-empty paths
+                duration = float(item.get('duration_ms', 0))
+                if duration > 0:
+                    path_durations[path].append(duration)
+
+        # Get top 5 paths by count
+        top_5_paths = sorted(path_totals.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_5_path_names = [p[0] for p in top_5_paths if p[0]]  # Exclude empty paths
+
+        # Prepare boxplot data
+        boxplot_data = []
+        colors = ['#4a9eff', '#32cd32', '#ffa500', '#ff69b4', '#9370db']
+        for idx, path_name in enumerate(top_5_path_names):
+            if path_name in path_durations:
+                boxplot_data.append({
+                    'y': path_durations[path_name],
+                    'name': path_name,
+                    'type': 'box',
+                    'marker': {'color': colors[idx % len(colors)]}
+                })
+
+        html += f'''
+        <div class="chart-container">
+            <div class="chart-title">📊 Duration Distribution (Log Scale)</div>
+            <div style="font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 1rem;">
+                Similar to Jupyter notebook analysis - log-scaled bins for better visualization
+            </div>
+            <div id="durationHistogram" style="width: 100%; height: 400px;"></div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">📦 Duration by Path (Top 5)</div>
+            <div style="font-size: 0.9rem; color: #888; text-align: center; margin-bottom: 1rem;">
+                Boxplots showing duration distribution for each endpoint
+            </div>
+            <div id="durationBoxplot" style="width: 100%; height: 400px;"></div>
         </div>
 
         <div class="chart-container">
@@ -3175,6 +3222,65 @@ def lambda_handler(event, context):
 
         html += '''
         <script>
+        // Duration histogram data (log scale, matching Jupyter notebook)
+        const durations = ''' + str(durations) + ''';
+
+        // Duration boxplot data
+        const boxplotData = ''' + str(boxplot_data) + ''';
+
+        // Render duration histogram with Plotly
+        if (durations.length > 0) {
+            const trace = {
+                x: durations,
+                type: 'histogram',
+                marker: {
+                    color: '#4a9eff',
+                    line: { color: '#1a1a1a', width: 1 }
+                },
+                nbinsx: 50,
+                name: 'Duration (ms)'
+            };
+
+            const layout = {
+                paper_bgcolor: '#2a2a2a',
+                plot_bgcolor: '#1a1a1a',
+                font: { color: '#fff' },
+                xaxis: {
+                    title: 'Duration (ms)',
+                    type: 'log',
+                    gridcolor: '#3a3a3a'
+                },
+                yaxis: {
+                    title: 'Count',
+                    gridcolor: '#3a3a3a'
+                },
+                margin: { l: 60, r: 30, t: 30, b: 60 }
+            };
+
+            Plotly.newPlot('durationHistogram', [trace], layout, {responsive: true});
+        }
+
+        // Render boxplots with Plotly
+        if (boxplotData.length > 0) {
+            const layout = {
+                paper_bgcolor: '#2a2a2a',
+                plot_bgcolor: '#1a1a1a',
+                font: { color: '#fff' },
+                yaxis: {
+                    title: 'Duration (ms)',
+                    type: 'log',
+                    gridcolor: '#3a3a3a'
+                },
+                xaxis: {
+                    gridcolor: '#3a3a3a'
+                },
+                margin: { l: 60, r: 30, t: 30, b: 100 },
+                showlegend: false
+            };
+
+            Plotly.newPlot('durationBoxplot', boxplotData, layout, {responsive: true});
+        }
+
         const chartDates = ''' + str(chart_dates) + ''';
         const chartCounts = ''' + str(chart_counts) + ''';
         const chartDurations = ''' + str([d/1000 for d in chart_durations]) + ''';
