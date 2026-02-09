@@ -312,6 +312,99 @@ def get_gardencam_stats(limit=500):
         return []
 
 
+def get_cloudwatch_metrics(function_name, days=30):
+    """Get CloudWatch metrics for Lambda function."""
+    if not BOTO3_AVAILABLE:
+        return {}
+
+    try:
+        from datetime import timedelta
+        cloudwatch = boto3.client('cloudwatch', region_name=GARDENCAM_REGION)
+
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(days=days)
+
+        metrics = {}
+
+        # Get invocations
+        response = cloudwatch.get_metric_statistics(
+            Namespace='AWS/Lambda',
+            MetricName='Invocations',
+            Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
+            StartTime=start_time,
+            EndTime=end_time,
+            Period=86400,  # 1 day
+            Statistics=['Sum']
+        )
+        metrics['invocations'] = response.get('Datapoints', [])
+
+        # Get errors
+        response = cloudwatch.get_metric_statistics(
+            Namespace='AWS/Lambda',
+            MetricName='Errors',
+            Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
+            StartTime=start_time,
+            EndTime=end_time,
+            Period=86400,
+            Statistics=['Sum']
+        )
+        metrics['errors'] = response.get('Datapoints', [])
+
+        # Get throttles
+        response = cloudwatch.get_metric_statistics(
+            Namespace='AWS/Lambda',
+            MetricName='Throttles',
+            Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
+            StartTime=start_time,
+            EndTime=end_time,
+            Period=86400,
+            Statistics=['Sum']
+        )
+        metrics['throttles'] = response.get('Datapoints', [])
+
+        # Get duration
+        response = cloudwatch.get_metric_statistics(
+            Namespace='AWS/Lambda',
+            MetricName='Duration',
+            Dimensions=[{'Name': 'FunctionName', 'Value': function_name}],
+            StartTime=start_time,
+            EndTime=end_time,
+            Period=86400,
+            Statistics=['Average', 'Maximum']
+        )
+        metrics['duration'] = response.get('Datapoints', [])
+
+        return metrics
+    except Exception as e:
+        print(f"Error fetching CloudWatch metrics: {e}")
+        return {}
+
+
+def categorize_path(path):
+    """Categorize path into application."""
+    if not path or path == '/':
+        return 'root'
+
+    path = path.lower()
+
+    if 'gardencam' in path:
+        return 'gardencam'
+    elif 't3' in path or 'parklands' in path or 'surbiton' in path:
+        return 't3-bus'
+    elif 'lambda-stats' in path:
+        return 'lambda-stats'
+    elif 'memspeed' in path:
+        return 'memspeed'
+    elif 'contents' in path:
+        return 'contents'
+    elif 'gitinfo' in path:
+        return 'gitinfo'
+    elif 'event' in path:
+        return 'debug'
+    else:
+        return 'other'
+
+
 def get_lambda_execution_stats(limit=1000):
     """Get Lambda execution statistics from DynamoDB."""
     if not BOTO3_AVAILABLE:
@@ -1681,6 +1774,269 @@ def lambda_handler(event, context):
             </div>
             '''
 
+    elif path.startswith(f'/{stage}/gardencam/timelapse/schedule') or path.startswith('/gardencam/timelapse/schedule'):
+        # Timelapse schedule page
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        html += '''
+        <title>Timelapse Schedule - Garden Camera</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
+            .nav { text-align: center; margin-bottom: 1.5rem; }
+            .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }
+            .nav a:hover { background: #3a3a3a; }
+            h1 { text-align: center; margin-bottom: 2rem; }
+            .container { max-width: 1200px; margin: 0 auto; }
+            .schedule-section { background: #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }
+            .schedule-section h2 { margin-top: 0; color: #4a9eff; }
+            .schedule-item { background: #1a1a1a; padding: 1rem; margin: 1rem 0; border-radius: 6px; border-left: 4px solid #4a9eff; }
+            .schedule-item h3 { margin: 0 0 0.5rem 0; color: #fff; }
+            .schedule-item p { margin: 0.25rem 0; color: #aaa; }
+            .status { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.85rem; margin-left: 0.5rem; }
+            .status.active { background: #10b981; color: #fff; }
+            .status.dryrun { background: #f59e0b; color: #000; }
+            table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+            th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #3a3a3a; }
+            th { color: #4a9eff; background: #1a1a1a; }
+        </style>
+        <div class="nav">
+            <a href="../../contents">Home</a>
+            <a href="../gardencam">Latest</a>
+            <a href="timelapse">Timelapse Index</a>
+            <a href="timelapse/videos">All Videos</a>
+        </div>
+        <div class="container">
+            <h1>Timelapse Automation Schedule</h1>
+
+            <div class="schedule-section">
+                <h2>🎬 Video Generation</h2>
+                <div class="schedule-item">
+                    <h3>Weekly Timelapse Creation <span class="status active">ACTIVE</span></h3>
+                    <p><strong>Schedule:</strong> Every Sunday at 2:00 AM UTC</p>
+                    <p><strong>Duration:</strong> 20 seconds per video (480 frames at 24fps)</p>
+                    <p><strong>Output:</strong> videos/timelapse_YYYYMMDD-YYYYMMDD.mp4</p>
+                    <p><strong>Lambda:</strong> gardencam-timelapse-generator (3GB memory, 15 min timeout)</p>
+                    <p><strong>Next Run:</strong> Next Sunday 02:00 UTC</p>
+                </div>
+            </div>
+
+            <div class="schedule-section">
+                <h2>🗑️ Image Culling</h2>
+                <div class="schedule-item">
+                    <h3>Daily Cleanup Check <span class="status dryrun">DRY-RUN</span></h3>
+                    <p><strong>Schedule:</strong> Every day at 12:00 PM UTC</p>
+                    <p><strong>Mode:</strong> Dry-run (no actual deletion yet)</p>
+                    <p><strong>Protection:</strong> ALL night images preserved forever</p>
+                    <p><strong>Retention:</strong> Latest 14 days always kept</p>
+                    <p><strong>Lambda:</strong> gardencam-image-culling (512MB memory, 5 min timeout)</p>
+                </div>
+
+                <h3 style="margin-top: 2rem;">Retention Policy</h3>
+                <table>
+                    <tr>
+                        <th>Age</th>
+                        <th>Day Images</th>
+                        <th>Night Images</th>
+                    </tr>
+                    <tr>
+                        <td>0-14 days</td>
+                        <td>Keep all</td>
+                        <td>Keep all</td>
+                    </tr>
+                    <tr>
+                        <td>15-30 days</td>
+                        <td>Keep 1 per day</td>
+                        <td>Keep all</td>
+                    </tr>
+                    <tr>
+                        <td>31-90 days</td>
+                        <td>Keep 1 per week</td>
+                        <td>Keep all</td>
+                    </tr>
+                    <tr>
+                        <td>90+ days</td>
+                        <td>Keep 1 per month</td>
+                        <td>Keep all</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="schedule-section">
+                <h2>📊 Storage Summary</h2>
+                <div class="schedule-item">
+                    <h3>Hourly Storage Stats Update <span class="status active">ACTIVE</span></h3>
+                    <p><strong>Schedule:</strong> Every hour</p>
+                    <p><strong>Function:</strong> Calculate S3 storage statistics</p>
+                    <p><strong>Lambda:</strong> gardencam-storage-summary</p>
+                </div>
+            </div>
+
+            <div class="schedule-section">
+                <h2>ℹ️ System Information</h2>
+                <p><strong>Region:</strong> eu-west-1 (Ireland)</p>
+                <p><strong>S3 Bucket:</strong> gardencam-berrylands-eu-west-1</p>
+                <p><strong>Video Format:</strong> MP4 (H.264, 1920x1080, 24fps)</p>
+                <p><strong>Frame Selection:</strong> Evenly distributed from all images in date range</p>
+            </div>
+        </div>
+        '''
+
+    elif path.startswith(f'/{stage}/gardencam/timelapse/videos') or path.startswith('/gardencam/timelapse/videos'):
+        # Redirect to /gardencam/videos
+        return {
+            'statusCode': 302,
+            'headers': {
+                'Location': f'/{stage}/gardencam/videos'
+            }
+        }
+
+    elif path.startswith(f'/{stage}/gardencam/timelapse') or path.startswith('/gardencam/timelapse'):
+        # Timelapse index page
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        # Get latest 3 videos
+        s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+        videos = []
+
+        try:
+            response = s3.list_objects_v2(
+                Bucket=GARDENCAM_BUCKET,
+                Prefix='videos/timelapse_'
+            )
+
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    if key.endswith('.mp4'):
+                        video_id = key.replace('videos/', '').replace('.mp4', '')
+                        date_part = video_id.replace('timelapse_', '')
+                        try:
+                            start_date, end_date = date_part.split('-')
+                            start_formatted = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
+                            end_formatted = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
+                        except:
+                            start_formatted = "Unknown"
+                            end_formatted = "Unknown"
+
+                        videos.append({
+                            'id': video_id,
+                            'key': key,
+                            'size_mb': obj['Size'] / 1048576,
+                            'start_date': start_formatted,
+                            'end_date': end_formatted
+                        })
+
+            videos.sort(key=lambda v: v['id'], reverse=True)
+            latest_videos = videos[:3]
+            total_videos = len(videos)
+
+        except Exception as e:
+            print(f"Error listing videos: {e}")
+            latest_videos = []
+            total_videos = 0
+
+        html += f'''
+        <title>Timelapse Videos - Garden Camera</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+            .nav {{ text-align: center; margin-bottom: 1.5rem; }}
+            .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+            .nav a:hover {{ background: #3a3a3a; }}
+            h1 {{ text-align: center; margin-bottom: 2rem; }}
+            .container {{ max-width: 1200px; margin: 0 auto; }}
+            .info-section {{ background: #2a2a2a; border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; }}
+            .info-section h2 {{ margin-top: 0; color: #4a9eff; }}
+            .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 1.5rem 0; }}
+            .stat-box {{ background: #1a1a1a; padding: 1.5rem; border-radius: 6px; text-align: center; }}
+            .stat-value {{ font-size: 2.5rem; font-weight: bold; color: #4a9eff; }}
+            .stat-label {{ color: #888; margin-top: 0.5rem; }}
+            .latest-videos {{ margin-top: 2rem; }}
+            .video-list {{ list-style: none; padding: 0; }}
+            .video-list li {{ background: #1a1a1a; padding: 1rem; margin: 0.5rem 0; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }}
+            .video-list li:hover {{ background: #252525; }}
+            .video-title {{ color: #4a9eff; font-weight: bold; }}
+            .video-date {{ color: #888; font-size: 0.9rem; }}
+            .button {{ display: inline-block; padding: 0.75rem 1.5rem; background: #4a9eff; color: #fff; text-decoration: none; border-radius: 6px; margin: 0.5rem; }}
+            .button:hover {{ background: #3a8eef; }}
+            .button.secondary {{ background: #2a2a2a; }}
+            .button.secondary:hover {{ background: #3a3a3a; }}
+        </style>
+        <div class="nav">
+            <a href="../../contents">Home</a>
+            <a href="../gardencam">Latest</a>
+            <a href="videos">All Videos</a>
+            <a href="timelapse/schedule">Schedule</a>
+        </div>
+        <div class="container">
+            <h1>🎬 Garden Timelapse Videos</h1>
+
+            <div class="info-section">
+                <h2>Overview</h2>
+                <p>Automated weekly timelapse videos created from garden camera images. Each video condenses a week of captures into a smooth 20-second timelapse.</p>
+
+                <div class="stats">
+                    <div class="stat-box">
+                        <div class="stat-value">{total_videos}</div>
+                        <div class="stat-label">Total Videos</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">20s</div>
+                        <div class="stat-label">Duration Each</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">480</div>
+                        <div class="stat-label">Frames Each</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">24fps</div>
+                        <div class="stat-label">Frame Rate</div>
+                    </div>
+                </div>
+
+                <div style="text-align: center; margin-top: 1.5rem;">
+                    <a href="videos" class="button">View All Videos</a>
+                    <a href="timelapse/schedule" class="button secondary">View Schedule</a>
+                </div>
+            </div>
+
+            <div class="info-section latest-videos">
+                <h2>Latest Videos</h2>
+                <ul class="video-list">
+        '''
+
+        for video in latest_videos:
+            html += f'''
+                <li>
+                    <div>
+                        <div class="video-title">{video['id'].replace('timelapse_', 'Week of ')}</div>
+                        <div class="video-date">{video['start_date']} to {video['end_date']} • {video['size_mb']:.1f} MB</div>
+                    </div>
+                    <a href="videos" class="button">Watch</a>
+                </li>
+            '''
+
+        html += '''
+                </ul>
+            </div>
+        </div>
+        '''
+
     elif path.startswith(f'/{stage}/gardencam/videos') or path.startswith('/gardencam/videos'):
         # Timelapse video gallery page
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -1790,9 +2146,10 @@ def lambda_handler(event, context):
         <div class="nav">
             <a href="../../contents">Home</a>
             <a href="../gardencam">Latest</a>
+            <a href="timelapse">Timelapse Index</a>
+            <a href="timelapse/schedule">Schedule</a>
             <a href="gallery">Gallery</a>
             <a href="stats">Capture Stats</a>
-            <a href="s3-stats">Storage Stats</a>
         </div>
         <h1>Timelapse Videos</h1>
         '''
@@ -2028,6 +2385,43 @@ def lambda_handler(event, context):
 
         top_paths = sorted(path_totals.items(), key=lambda x: x[1], reverse=True)[:10]
 
+        # Get CloudWatch metrics
+        cw_metrics = get_cloudwatch_metrics('cvterraform', days=30)
+
+        # Calculate total CloudWatch stats
+        total_cw_invocations = sum(dp.get('Sum', 0) for dp in cw_metrics.get('invocations', []))
+        total_cw_errors = sum(dp.get('Sum', 0) for dp in cw_metrics.get('errors', []))
+        total_cw_throttles = sum(dp.get('Sum', 0) for dp in cw_metrics.get('throttles', []))
+
+        avg_cw_duration = 0
+        max_cw_duration = 0
+        if cw_metrics.get('duration'):
+            durations = [dp.get('Average', 0) for dp in cw_metrics['duration'] if dp.get('Average')]
+            maxes = [dp.get('Maximum', 0) for dp in cw_metrics['duration'] if dp.get('Maximum')]
+            if durations:
+                avg_cw_duration = sum(durations) / len(durations)
+            if maxes:
+                max_cw_duration = max(maxes)
+
+        error_rate = (total_cw_errors / total_cw_invocations * 100) if total_cw_invocations > 0 else 0
+
+        # Calculate stats by application
+        app_stats = defaultdict(lambda: {
+            'count': 0,
+            'total_duration_ms': Decimal('0'),
+            'total_cost_usd': Decimal('0')
+        })
+
+        for item in stats:
+            path = item.get('path', '')
+            app = categorize_path(path)
+            app_stats[app]['count'] += 1
+            app_stats[app]['total_duration_ms'] += Decimal(str(item.get('duration_ms', 0)))
+            app_stats[app]['total_cost_usd'] += Decimal(str(item.get('estimated_cost_usd', 0)))
+
+        # Sort apps by count
+        sorted_apps = sorted(app_stats.items(), key=lambda x: x[1]['count'], reverse=True)
+
         # Determine free tier status color
         free_tier_status = 'good' if request_usage_pct < 50 else ('warning' if request_usage_pct < 80 else 'danger')
         status_colors = {'good': '#32cd32', 'warning': '#ffa500', 'danger': '#ff4444'}
@@ -2113,6 +2507,72 @@ def lambda_handler(event, context):
                     </div>
                 </div>
             </div>
+        </div>
+
+        <div class="stats-summary">
+            <h2>CloudWatch Metrics (Last 30 Days)</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-value">{int(total_cw_invocations):,}</div>
+                    <div class="stat-label">Total Invocations</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" style="color: {'#ff4444' if total_cw_errors > 0 else '#32cd32'};">{int(total_cw_errors):,}</div>
+                    <div class="stat-label">Errors</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" style="color: {'#ff4444' if total_cw_throttles > 0 else '#32cd32'};">{int(total_cw_throttles):,}</div>
+                    <div class="stat-label">Throttles</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" style="color: {'#ff4444' if error_rate > 5 else ('#ffa500' if error_rate > 1 else '#32cd32')};">{error_rate:.2f}%</div>
+                    <div class="stat-label">Error Rate</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{avg_cw_duration:.0f}ms</div>
+                    <div class="stat-label">Avg Duration (CW)</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{max_cw_duration:.0f}ms</div>
+                    <div class="stat-label">Max Duration (CW)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-summary">
+            <h2>Statistics by Application</h2>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>Application</th>
+                        <th>Requests</th>
+                        <th>Avg Duration</th>
+                        <th>Total Cost</th>
+                        <th>Percentage</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        for app_name, app_data in sorted_apps:
+            app_count = app_data['count']
+            app_avg_duration = float(app_data['total_duration_ms']) / app_count if app_count > 0 else 0
+            app_cost = float(app_data['total_cost_usd'])
+            app_percentage = (app_count / total_executions * 100) if total_executions > 0 else 0
+
+            html += f'''
+                    <tr>
+                        <td><strong>{app_name}</strong></td>
+                        <td>{app_count:,}</td>
+                        <td>{app_avg_duration:.0f}ms</td>
+                        <td>${app_cost:.6f}</td>
+                        <td>{app_percentage:.1f}%</td>
+                    </tr>
+            '''
+
+        html += f'''
+                </tbody>
+            </table>
         </div>
 
         <div class="stats-summary">
