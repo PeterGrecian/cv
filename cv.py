@@ -1787,6 +1787,7 @@ def lambda_handler(event, context):
             }
 
         html += '''
+        <meta charset="UTF-8">
         <title>Timelapse Schedule - Garden Camera</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
@@ -1817,7 +1818,7 @@ def lambda_handler(event, context):
             <h1>Timelapse Automation Schedule</h1>
 
             <div class="schedule-section">
-                <h2>🎬 Video Generation</h2>
+                <h2>Video Generation</h2>
                 <div class="schedule-item">
                     <h3>Weekly Timelapse Creation <span class="status active">ACTIVE</span></h3>
                     <p><strong>Schedule:</strong> Every Sunday at 2:00 AM UTC</p>
@@ -1829,7 +1830,7 @@ def lambda_handler(event, context):
             </div>
 
             <div class="schedule-section">
-                <h2>🗑️ Image Culling</h2>
+                <h2>Image Culling</h2>
                 <div class="schedule-item">
                     <h3>Daily Cleanup Check <span class="status dryrun">DRY-RUN</span></h3>
                     <p><strong>Schedule:</strong> Every day at 12:00 PM UTC</p>
@@ -1870,7 +1871,7 @@ def lambda_handler(event, context):
             </div>
 
             <div class="schedule-section">
-                <h2>📊 Storage Summary</h2>
+                <h2>Storage Summary</h2>
                 <div class="schedule-item">
                     <h3>Hourly Storage Stats Update <span class="status active">ACTIVE</span></h3>
                     <p><strong>Schedule:</strong> Every hour</p>
@@ -1880,7 +1881,7 @@ def lambda_handler(event, context):
             </div>
 
             <div class="schedule-section">
-                <h2>ℹ️ System Information</h2>
+                <h2>System Information</h2>
                 <p><strong>Region:</strong> eu-west-1 (Ireland)</p>
                 <p><strong>S3 Bucket:</strong> gardencam-berrylands-eu-west-1</p>
                 <p><strong>Video Format:</strong> MP4 (H.264, 1920x1080, 24fps)</p>
@@ -1984,7 +1985,7 @@ def lambda_handler(event, context):
             <a href="timelapse/schedule">Schedule</a>
         </div>
         <div class="container">
-            <h1>🎬 Garden Timelapse Videos</h1>
+            <h1>Garden Timelapse Videos</h1>
 
             <div class="info-section">
                 <h2>Overview</h2>
