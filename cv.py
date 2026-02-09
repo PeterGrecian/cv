@@ -111,8 +111,8 @@ def log_connection(event, context):
         print(f"Failed to log connection: {str(e)}")
 
 
-def log_execution_metrics(context, duration_ms, path=''):
-    """Log Lambda execution metrics to DynamoDB."""
+def log_execution_metrics(context, duration_ms, path='', ip='', user_agent=''):
+    """Log Lambda execution metrics to DynamoDB with IP and User-Agent."""
     if not BOTO3_AVAILABLE:
         return
 
@@ -140,7 +140,9 @@ def log_execution_metrics(context, duration_ms, path=''):
             'duration_ms': Decimal(str(duration_ms)),
             'memory_limit_mb': Decimal(str(context.memory_limit_in_mb)),
             'path': path,
-            'estimated_cost_usd': total_cost
+            'estimated_cost_usd': total_cost,
+            'ip_address': ip,
+            'user_agent': user_agent
         }
 
         table.put_item(Item=item)
@@ -3447,7 +3449,9 @@ def lambda_handler(event, context):
         if 'application/json' in accept:
             # Return JSON for API consumers (e.g., Android app)
             duration_ms = (time.time() - start_time) * 1000
-            log_execution_metrics(context, duration_ms, path)
+            ip = headers.get('X-Forwarded-For', headers.get('x-forwarded-for', 'Unknown'))
+            user_agent = headers.get('User-Agent', headers.get('user-agent', 'Unknown'))
+            log_execution_metrics(context, duration_ms, path, ip, user_agent)
 
             if error:
                 return {
@@ -3479,7 +3483,10 @@ def lambda_handler(event, context):
 
     # Log execution metrics
     duration_ms = (time.time() - start_time) * 1000
-    log_execution_metrics(context, duration_ms, path)
+    headers = event.get('headers', {}) or {}
+    ip = headers.get('X-Forwarded-For', headers.get('x-forwarded-for', 'Unknown'))
+    user_agent = headers.get('User-Agent', headers.get('user-agent', 'Unknown'))
+    log_execution_metrics(context, duration_ms, path, ip, user_agent)
 
     return {
         'statusCode': 200,
