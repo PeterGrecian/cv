@@ -490,6 +490,36 @@ def categorize_path(path):
         return 'other'
 
 
+def get_ip_geolocation(ip_address):
+    """Get geolocation data for an IP address using ip-api.com (free, no key needed)."""
+    if not ip_address or ip_address == 'Unknown':
+        return {'country': 'Unknown', 'city': 'Unknown', 'lat': 0, 'lon': 0}
+
+    # Handle multiple IPs in X-Forwarded-For (take first one)
+    if ',' in ip_address:
+        ip_address = ip_address.split(',')[0].strip()
+
+    try:
+        import urllib.request
+        import json
+
+        url = f'http://ip-api.com/json/{ip_address}?fields=status,country,city,lat,lon'
+        with urllib.request.urlopen(url, timeout=2) as response:
+            data = json.loads(response.read().decode())
+
+            if data.get('status') == 'success':
+                return {
+                    'country': data.get('country', 'Unknown'),
+                    'city': data.get('city', 'Unknown'),
+                    'lat': data.get('lat', 0),
+                    'lon': data.get('lon', 0)
+                }
+    except Exception as e:
+        print(f"Error getting geolocation for {ip_address}: {e}")
+
+    return {'country': 'Unknown', 'city': 'Unknown', 'lat': 0, 'lon': 0}
+
+
 def get_lambda_execution_stats(limit=1000):
     """Get Lambda execution statistics from DynamoDB."""
     if not BOTO3_AVAILABLE:
@@ -3103,35 +3133,66 @@ def lambda_handler(event, context):
         top_uas = ua_data.most_common(20)
         sorted_patterns = sorted(ip_patterns, key=lambda x: x['avg_interval'])
 
+        # Get geolocation for top IPs
+        import time as time_module
+        ip_geo_data = []
+        country_counts = Counter()
+
+        for ip, data in top_ips[:15]:  # Limit to 15 to avoid rate limiting
+            time_module.sleep(0.15)  # Rate limit: ~6 requests/second
+            geo = get_ip_geolocation(ip)
+            ip_geo_data.append({
+                'ip': ip,
+                'count': data['count'],
+                'country': geo['country'],
+                'city': geo['city'],
+                'paths': data['paths'],
+                'user_agents': data['user_agents']
+            })
+            country_counts[geo['country']] += data['count']
+
         html += f'''
         <div class="stats-summary">
-            <h2>🌐 IP Address Analysis ({len(ip_data)} unique IPs)</h2>
+            <h2>🌍 IP Address Analysis with Geolocation ({len(ip_data)} unique IPs)</h2>
             <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
-                Showing top 20 IP addresses by request count
+                Geographic distribution and top IP addresses
             </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-bottom: 2rem;">
+                <div>
+                    <div class="chart-title">Top 10 IP Addresses</div>
+                    <div id="ipPieChart" style="height: 400px;"></div>
+                </div>
+                <div>
+                    <div class="chart-title">Requests by Country</div>
+                    <div id="countryPieChart" style="height: 400px;"></div>
+                </div>
+            </div>
+
             <table class="daily-table">
                 <thead>
                     <tr>
                         <th>IP Address</th>
+                        <th>Country</th>
+                        <th>City</th>
                         <th>Requests</th>
                         <th>Top Path</th>
-                        <th>Top User-Agent</th>
                     </tr>
                 </thead>
                 <tbody>
         '''
 
-        for ip, data in top_ips:
-            top_path = data['paths'].most_common(1)[0] if data['paths'] else ('unknown', 0)
-            top_ua = data['user_agents'].most_common(1)[0] if data['user_agents'] else ('Unknown', 0)
-            ua_short = (top_ua[0][:60] + '...') if len(top_ua[0]) > 60 else top_ua[0]
+        for ip_info in ip_geo_data:
+            top_path = ip_info['paths'].most_common(1)[0] if ip_info['paths'] else ('unknown', 0)
+            display_path = top_path[0] if top_path[0] else '(root)'
 
             html += f'''
                     <tr>
-                        <td><code>{ip}</code></td>
-                        <td>{data['count']:,}</td>
-                        <td>{top_path[0] if top_path[0] else '(root)'}</td>
-                        <td style="font-size: 0.85rem; color: #aaa;">{ua_short}</td>
+                        <td><code>{ip_info['ip']}</code></td>
+                        <td>{ip_info['country']}</td>
+                        <td>{ip_info['city']}</td>
+                        <td>{ip_info['count']:,}</td>
+                        <td><code>{display_path}</code></td>
                     </tr>
             '''
 
@@ -3279,6 +3340,53 @@ def lambda_handler(event, context):
             };
 
             Plotly.newPlot('durationBoxplot', boxplotData, layout, {responsive: true});
+        }
+
+        // IP Address Pie Chart
+        const ipLabels = ''' + str([ip_info['ip'] for ip_info in ip_geo_data[:10]]) + ''';
+        const ipValues = ''' + str([ip_info['count'] for ip_info in ip_geo_data[:10]]) + ''';
+
+        if (ipLabels.length > 0) {
+            Plotly.newPlot('ipPieChart', [{
+                labels: ipLabels,
+                values: ipValues,
+                type: 'pie',
+                textinfo: 'label+percent',
+                marker: {
+                    colors: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
+                             '#1abc9c', '#34495e', '#16a085', '#27ae60', '#2980b9']
+                }
+            }], {
+                paper_bgcolor: '#2a2a2a',
+                plot_bgcolor: '#1a1a1a',
+                font: { color: '#fff', size: 11 },
+                margin: { l: 10, r: 10, t: 10, b: 10 },
+                showlegend: true,
+                legend: { font: { size: 10 } }
+            }, {responsive: true});
+        }
+
+        // Country Pie Chart
+        const countryLabels = ''' + str(list(country_counts.keys())) + ''';
+        const countryValues = ''' + str(list(country_counts.values())) + ''';
+
+        if (countryLabels.length > 0) {
+            Plotly.newPlot('countryPieChart', [{
+                labels: countryLabels,
+                values: countryValues,
+                type: 'pie',
+                textinfo: 'label+percent',
+                marker: {
+                    colors: ['#2ecc71', '#3498db', '#f39c12', '#e74c3c', '#9b59b6',
+                             '#1abc9c', '#34495e', '#16a085', '#27ae60', '#2980b9']
+                }
+            }], {
+                paper_bgcolor: '#2a2a2a',
+                plot_bgcolor: '#1a1a1a',
+                font: { color: '#fff', size: 12 },
+                margin: { l: 10, r: 10, t: 10, b: 10 },
+                showlegend: true
+            }, {responsive: true});
         }
 
         const chartDates = ''' + str(chart_dates) + ''';
