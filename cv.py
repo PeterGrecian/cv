@@ -1738,10 +1738,17 @@ def lambda_handler(event, context):
                             frame_count = 0
                             duration = 5
 
+                        # Generate presigned URL (valid for 1 hour)
+                        presigned_url = s3.generate_presigned_url(
+                            'get_object',
+                            Params={'Bucket': GARDENCAM_BUCKET, 'Key': key},
+                            ExpiresIn=3600
+                        )
+
                         videos.append({
                             'id': video_id,
                             'key': key,
-                            'url': f"https://{GARDENCAM_BUCKET}.s3.{GARDENCAM_REGION}.amazonaws.com/{key}",
+                            'url': presigned_url,
                             'size_mb': obj['Size'] / 1048576,
                             'last_modified': obj['LastModified'].isoformat(),
                             'start_date': start_formatted,
