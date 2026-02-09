@@ -2803,6 +2803,43 @@ def lambda_handler(event, context):
         </div>
 
         <div class="stats-summary">
+            <h2>🔍 Data Availability Check</h2>
+            <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem;">
+                Showing which dates have execution data in DynamoDB
+            </div>
+            <table class="daily-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Executions</th>
+                        <th>In Last 10 Days?</th>
+                    </tr>
+                </thead>
+                <tbody>
+        '''
+
+        # Show last 30 dates to help debug
+        today = datetime.utcnow().date()
+        last_30_days = [(today - timedelta(days=i)).strftime('%Y-%m-%d') for i in range(29, -1, -1)]
+
+        for date in last_30_days:
+            if date in daily_stats:
+                count = daily_stats[date]['count']
+                in_range = "✓ Yes" if date in chart_dates else "No"
+                html += f'''
+                    <tr style="{'background: #1a3a1a;' if date in chart_dates else ''}">
+                        <td><strong>{date}</strong></td>
+                        <td>{count:,}</td>
+                        <td>{in_range}</td>
+                    </tr>
+                '''
+
+        html += '''
+                </tbody>
+            </table>
+        </div>
+
+        <div class="stats-summary">
             <h2>📊 Historical CloudWatch Metrics (All Functions - Last 30 Days)</h2>
             <div style="font-size: 0.9rem; color: #888; margin-bottom: 1rem; text-align: center;">
                 Includes all Lambda invocations from CloudWatch monitoring
@@ -3031,41 +3068,6 @@ def lambda_handler(event, context):
         <div class="chart-container">
             <div class="chart-title">Daily Cost in Microdollars (µ$) - Last 10 Days</div>
             <canvas id="costChart"></canvas>
-        </div>
-
-        <div class="stats-summary" style="max-width: 1400px; margin: 2rem auto;">
-            <h2>🔍 Interactive Time-Series Analysis</h2>
-            <div style="display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center;">
-                <div>
-                    <label style="color: #aaa; margin-right: 0.5rem;">Time Range:</label>
-                    <select id="timeRange" style="padding: 0.5rem; background: #2a2a2a; color: #fff; border: 1px solid #3a3a3a; border-radius: 4px;">
-                        <option value="1h">Last Hour</option>
-                        <option value="6h">Last 6 Hours</option>
-                        <option value="24h" selected>Last 24 Hours</option>
-                        <option value="7d">Last 7 Days</option>
-                        <option value="30d">Last 30 Days</option>
-                        <option value="all">All Time</option>
-                    </select>
-                </div>
-                <div>
-                    <label style="color: #aaa; margin-right: 0.5rem;">Bucket Size:</label>
-                    <select id="bucketSize" style="padding: 0.5rem; background: #2a2a2a; color: #fff; border: 1px solid #3a3a3a; border-radius: 4px;">
-                        <option value="1m">1 Minute</option>
-                        <option value="5m">5 Minutes</option>
-                        <option value="15m">15 Minutes</option>
-                        <option value="1h" selected>1 Hour</option>
-                        <option value="6h">6 Hours</option>
-                        <option value="1d">1 Day</option>
-                    </select>
-                </div>
-                <div style="flex: 1;">
-                    <label style="color: #aaa; margin-right: 0.5rem;">Filter by Path:</label>
-                    <div id="pathFilters" style="display: inline-flex; gap: 0.5rem; flex-wrap: wrap;"></div>
-                </div>
-            </div>
-            <div class="chart-container" style="margin-top: 0;">
-                <canvas id="interactiveChart" style="max-height: 500px;"></canvas>
-            </div>
         </div>
 
         <div class="stats-summary">
@@ -3562,190 +3564,6 @@ def lambda_handler(event, context):
                 }
             }
         });
-
-        // Interactive Time-Series Chart
-        // Prepare raw execution data with timestamps and paths
-        const rawExecutions = ''' + str([{
-            'timestamp': stat['timestamp'],
-            'path': stat.get('path', ''),
-            'duration_ms': float(stat.get('duration_ms', 0))
-        } for stat in stats]) + ''';
-
-        // Parse bucket size to milliseconds
-        function parseBucketSize(bucketStr) {
-            const map = {
-                '1m': 60 * 1000,
-                '5m': 5 * 60 * 1000,
-                '15m': 15 * 60 * 1000,
-                '1h': 60 * 60 * 1000,
-                '6h': 6 * 60 * 60 * 1000,
-                '1d': 24 * 60 * 60 * 1000
-            };
-            return map[bucketStr] || map['1h'];
-        }
-
-        // Parse time range to milliseconds
-        function parseTimeRange(rangeStr) {
-            const map = {
-                '1h': 60 * 60 * 1000,
-                '6h': 6 * 60 * 60 * 1000,
-                '24h': 24 * 60 * 60 * 1000,
-                '7d': 7 * 24 * 60 * 60 * 1000,
-                '30d': 30 * 24 * 60 * 60 * 1000,
-                'all': null
-            };
-            return map[rangeStr];
-        }
-
-        // Aggregate data by time buckets
-        function aggregateData(executions, bucketSizeMs, cutoffTime, selectedPaths) {
-            const now = new Date().getTime();
-            const buckets = {};
-
-            executions.forEach(exec => {
-                const timestamp = new Date(exec.timestamp).getTime();
-
-                // Filter by time range
-                if (cutoffTime && (now - timestamp) > cutoffTime) return;
-
-                // Filter by path if filters are active
-                if (selectedPaths.size > 0 && !selectedPaths.has(exec.path)) return;
-
-                // Calculate bucket key
-                const bucketKey = Math.floor(timestamp / bucketSizeMs) * bucketSizeMs;
-
-                if (!buckets[bucketKey]) {
-                    buckets[bucketKey] = { count: 0, paths: {} };
-                }
-
-                buckets[bucketKey].count++;
-
-                // Track per-path counts
-                if (!buckets[bucketKey].paths[exec.path]) {
-                    buckets[bucketKey].paths[exec.path] = 0;
-                }
-                buckets[bucketKey].paths[exec.path]++;
-            });
-
-            // Convert to sorted arrays
-            const sortedBuckets = Object.keys(buckets).sort((a, b) => parseInt(a) - parseInt(b));
-            const labels = sortedBuckets.map(b => {
-                const date = new Date(parseInt(b));
-                const bucketSizeHours = bucketSizeMs / (60 * 60 * 1000);
-                if (bucketSizeHours >= 24) {
-                    return date.toLocaleDateString();
-                } else if (bucketSizeHours >= 1) {
-                    return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-                } else {
-                    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-                }
-            });
-            const data = sortedBuckets.map(b => buckets[b].count);
-            const pathData = sortedBuckets.map(b => buckets[b].paths);
-
-            return { labels, data, pathData };
-        }
-
-        // Get unique paths and create filter checkboxes
-        const uniquePaths = [...new Set(rawExecutions.map(e => e.path))].sort();
-        const pathFiltersDiv = document.getElementById('pathFilters');
-        const selectedPaths = new Set();
-
-        uniquePaths.forEach(path => {
-            const label = document.createElement('label');
-            label.style.cssText = 'display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.6rem; background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 4px; cursor: pointer; font-size: 0.9em;';
-
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.value = path;
-            checkbox.addEventListener('change', () => {
-                if (checkbox.checked) {
-                    selectedPaths.add(path);
-                } else {
-                    selectedPaths.delete(path);
-                }
-                updateInteractiveChart();
-            });
-
-            const text = document.createTextNode(path || '(root)');
-
-            label.appendChild(checkbox);
-            label.appendChild(text);
-            pathFiltersDiv.appendChild(label);
-        });
-
-        // Create interactive chart
-        let interactiveChart = null;
-
-        function updateInteractiveChart() {
-            const timeRange = document.getElementById('timeRange').value;
-            const bucketSize = document.getElementById('bucketSize').value;
-
-            const bucketSizeMs = parseBucketSize(bucketSize);
-            const cutoffTime = parseTimeRange(timeRange);
-
-            const { labels, data } = aggregateData(rawExecutions, bucketSizeMs, cutoffTime, selectedPaths);
-
-            if (interactiveChart) {
-                interactiveChart.data.labels = labels;
-                interactiveChart.data.datasets[0].data = data;
-                interactiveChart.update();
-            } else {
-                interactiveChart = new Chart(document.getElementById('interactiveChart'), {
-                    type: 'line',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            label: 'Request Count',
-                            data: data,
-                            borderColor: '#4a9eff',
-                            backgroundColor: 'rgba(74, 158, 255, 0.2)',
-                            tension: 0.3,
-                            fill: true
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: { labels: { color: '#fff' } },
-                            tooltip: {
-                                callbacks: {
-                                    title: function(context) {
-                                        return context[0].label;
-                                    },
-                                    label: function(context) {
-                                        return 'Requests: ' + context.parsed.y;
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: {
-                                ticks: {
-                                    color: '#aaa',
-                                    maxRotation: 45,
-                                    minRotation: 45
-                                },
-                                grid: { color: '#3a3a3a' }
-                            },
-                            y: {
-                                ticks: { color: '#aaa' },
-                                grid: { color: '#3a3a3a' },
-                                beginAtZero: true
-                            }
-                        }
-                    }
-                });
-            }
-        }
-
-        // Add event listeners
-        document.getElementById('timeRange').addEventListener('change', updateInteractiveChart);
-        document.getElementById('bucketSize').addEventListener('change', updateInteractiveChart);
-
-        // Initial render
-        updateInteractiveChart();
         </script>
         </body>
         </html>
