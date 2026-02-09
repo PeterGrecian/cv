@@ -97,7 +97,7 @@ def log_connection(event, context):
 
         item = {
             'timestamp': timestamp,
-            'request_id': context.request_id,
+            'request_id': context.aws_request_id,
             'path': event.get('path', ''),
             'ip': headers.get('X-Forwarded-For', 'Unknown'),
             'user_agent': user_agent,
@@ -136,7 +136,7 @@ def log_execution_metrics(context, duration_ms, path=''):
         item = {
             'function_name': function_name,
             'timestamp': timestamp,
-            'request_id': context.request_id,
+            'request_id': context.aws_request_id,
             'duration_ms': Decimal(str(duration_ms)),
             'memory_limit_mb': Decimal(str(context.memory_limit_in_mb)),
             'path': path,
@@ -1729,12 +1729,16 @@ def lambda_handler(event, context):
 
                             if 'Item' in metadata_response:
                                 item = metadata_response['Item']
-                                frame_count = int(item.get('frame_count', 0))
-                                duration = int(item.get('duration_seconds', 5))
+                                # Convert Decimal to int
+                                frame_count = int(float(item.get('frame_count', 0)))
+                                duration = int(float(item.get('duration_seconds', 5)))
+                                print(f"Video {video_id}: {frame_count} frames, {duration}s")
                             else:
+                                print(f"No metadata found for {video_id}")
                                 frame_count = 0
                                 duration = 5
-                        except:
+                        except Exception as e:
+                            print(f"Error getting metadata for {video_id}: {e}")
                             frame_count = 0
                             duration = 5
 
