@@ -2615,7 +2615,7 @@ def lambda_handler(event, context):
         chart_costs = []
         chart_path_data = defaultdict(list)
 
-        for date in reversed(sorted_dates[-30:]):  # Last 30 days
+        for date in reversed(sorted_dates[-10:]):  # Last 10 days
             chart_dates.append(date)
             chart_counts.append(daily_stats[date]['count'])
             chart_durations.append(float(daily_stats[date]['total_duration_ms']))
@@ -3003,22 +3003,22 @@ def lambda_handler(event, context):
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Executions by Endpoint (Recent DynamoDB Logs)</div>
+            <div class="chart-title">Executions by Endpoint (Last 10 Days)</div>
             <canvas id="pathChart"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Daily Execution Count (Recent Logs)</div>
+            <div class="chart-title">Daily Execution Count (Last 10 Days)</div>
             <canvas id="countChart"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Daily Total Duration (Recent Logs)</div>
+            <div class="chart-title">Daily Total Duration (Last 10 Days)</div>
             <canvas id="durationChart"></canvas>
         </div>
 
         <div class="chart-container">
-            <div class="chart-title">Daily Cost in Microdollars (µ$) - After Free Tier</div>
+            <div class="chart-title">Daily Cost in Microdollars (µ$) - Last 10 Days</div>
             <canvas id="costChart"></canvas>
         </div>
 
