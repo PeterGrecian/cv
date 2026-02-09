@@ -3904,7 +3904,12 @@ def lambda_handler(event, context):
 
     else:
         html += open('cv.html', 'r').read()
-    content = f'<html><head>{fav}{html}</body></html>'
+
+    # If html already has complete structure (DOCTYPE), don't wrap it
+    if html.strip().startswith('<!DOCTYPE') or html.strip().startswith('<html'):
+        content = html
+    else:
+        content = f'<html><head>{fav}{html}</body></html>'
 
     # Log execution metrics
     duration_ms = (time.time() - start_time) * 1000
@@ -3917,7 +3922,7 @@ def lambda_handler(event, context):
         'statusCode': 200,
         'body': content,
         'headers': {
-            'Content-Type': 'text/html',
+            'Content-Type': 'text/html; charset=utf-8',
         }
     }
 
