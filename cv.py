@@ -529,8 +529,14 @@ def get_lambda_execution_stats(limit=1000):
         dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
         table = dynamodb.Table('lambda-execution-logs')
 
-        response = table.scan(Limit=limit)
-        items = response.get('Items', [])
+        items = []
+        response = table.scan()
+        items.extend(response.get('Items', []))
+
+        # Handle pagination - keep scanning until we have all items
+        while 'LastEvaluatedKey' in response:
+            response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+            items.extend(response.get('Items', []))
 
         # Sort by timestamp
         items.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
