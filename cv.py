@@ -1522,6 +1522,28 @@ def lambda_handler(event, context):
             timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
             image_url = get_presigned_url(image_key)
 
+            # Get image stats from DynamoDB
+            stats = None
+            try:
+                dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+                table = dynamodb.Table('gardencam-stats')
+                response = table.get_item(Key={'filename': image_key})
+                stats = response.get('Item', {})
+            except Exception as e:
+                print(f"Error fetching stats for {image_key}: {e}")
+
+            # Build metadata string
+            mode_info = ""
+            if stats:
+                mode = stats.get('mode', 'unknown').upper()
+                duration = stats.get('capture_duration_seconds', 0)
+                stacked = stats.get('stacked', False)
+
+                mode_label = f"{mode} ({int(duration)}s)"
+                if stacked:
+                    mode_label += " [6-frame stack]"
+                mode_info = f"<div style='font-size: 0.9rem; color: #888; margin-top: 0.5rem;'>{mode_label}</div>"
+
             html += f'''
             <title>Full Resolution - {timestamp}</title>
             <style>
@@ -1529,13 +1551,14 @@ def lambda_handler(event, context):
                 .nav {{ margin-bottom: 1rem; }}
                 .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
                 .nav a:hover {{ text-decoration: underline; }}
-                h2 {{ margin-bottom: 1rem; color: #aaa; }}
+                h2 {{ margin-bottom: 0.5rem; color: #aaa; }}
                 img {{ max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
             <div class="nav">
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a>
             </div>
             <h2>{timestamp} UTC</h2>
+            {mode_info}
             <img src="{image_url}" alt="Full resolution image">
             '''
         else:
@@ -1560,6 +1583,31 @@ def lambda_handler(event, context):
             timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
             image_url = get_presigned_url(image_key)
 
+            # Get image stats from DynamoDB
+            stats = None
+            try:
+                dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+                table = dynamodb.Table('gardencam-stats')
+                response = table.get_item(Key={'filename': image_key})
+                stats = response.get('Item', {})
+            except Exception as e:
+                print(f"Error fetching stats for {image_key}: {e}")
+
+            # Build metadata string
+            metadata = f"{timestamp} UTC"
+            if stats:
+                mode = stats.get('mode', 'unknown').upper()
+                duration = stats.get('capture_duration_seconds', 0)
+                stacked = stats.get('stacked', False)
+
+                mode_label = f"{mode} ({int(duration)}s)"
+                if stacked:
+                    mode_label += " [6-frame stack]"
+                metadata = f"{timestamp} UTC | {mode_label}"
+
+            # Extract mode info from metadata
+            mode_info = metadata.split(" UTC | ")[1] if " UTC | " in metadata else ""
+
             html += f'''
             <title>Display Width - {timestamp}</title>
             <style>
@@ -1568,6 +1616,7 @@ def lambda_handler(event, context):
                 .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
                 .nav a:hover {{ text-decoration: underline; }}
                 h2 {{ margin-bottom: 1rem; color: #aaa; }}
+                .metadata {{ font-size: 0.9rem; color: #888; margin-bottom: 1rem; }}
                 .image-container {{ max-width: 1920px; margin: 0 auto; }}
                 img {{ width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
@@ -1575,6 +1624,7 @@ def lambda_handler(event, context):
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="fullres?key={image_key}">Full Res</a>
             </div>
             <h2>{timestamp} UTC</h2>
+            <div class="metadata">{mode_info}</div>
             <div class="image-container">
                 <a href="fullres?key={image_key}">
                     <img src="{image_url}" alt="Display width image">
@@ -2637,16 +2687,35 @@ def lambda_handler(event, context):
             <div class="gallery">
             '''
             labels = ['Latest', 'Previous', 'Earlier']
+
+            # Fetch stats for all images to get capture duration
+            all_stats = get_gardencam_stats(limit=10)
+            stats_by_filename = {s.get('filename'): s for s in all_stats}
+
             for idx, img in enumerate(images):
                 label = labels[idx] if idx < len(labels) else f'Image {idx+1}'
                 resolution_display = f" • {img['resolution']}" if img.get('resolution') else ""
+
+                # Get stats for this image
+                img_stats = stats_by_filename.get(img['key'], {})
+                mode_display = ""
+                if img_stats:
+                    mode = img_stats.get('mode', 'unknown').upper()
+                    duration = img_stats.get('capture_duration_seconds', 0)
+                    stacked = img_stats.get('stacked', False)
+
+                    mode_label = f"{mode} ({int(duration)}s)"
+                    if stacked:
+                        mode_label += " [6x]"
+                    mode_display = f" • {mode_label}"
+
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
                     <a href="gardencam/display?key={img['key']}">
                         <img src="{img['url']}" alt="{label} capture">
                     </a>
-                    <p class="timestamp">{img['timestamp']}{resolution_display}</p>
+                    <p class="timestamp">{img['timestamp']}{resolution_display}{mode_display}</p>
                 </div>
                 '''
             html += '</div>'
