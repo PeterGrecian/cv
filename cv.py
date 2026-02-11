@@ -1538,10 +1538,13 @@ def lambda_handler(event, context):
                 mode = stats.get('mode', 'unknown').upper()
                 duration = stats.get('capture_duration_seconds', 0)
                 stacked = stats.get('stacked', False)
+                diff_val = stats.get('image_diff', 0)
 
                 mode_label = f"{mode} ({int(duration)}s)"
                 if stacked:
                     mode_label += " [6-frame stack]"
+                if diff_val:
+                    mode_label += f" | Δ {float(diff_val):.1f}"
                 mode_info = f"<div style='font-size: 0.9rem; color: #888; margin-top: 0.5rem;'>{mode_label}</div>"
 
             html += f'''
@@ -1608,6 +1611,12 @@ def lambda_handler(event, context):
             # Extract mode info from metadata
             mode_info = metadata.split(" UTC | ")[1] if " UTC | " in metadata else ""
 
+            # Add diff value if available
+            diff_display = ""
+            if stats and 'image_diff' in stats:
+                diff_val = float(stats.get('image_diff', 0))
+                diff_display = f" | Δ {diff_val:.1f}"
+
             html += f'''
             <title>Display Width - {timestamp}</title>
             <style>
@@ -1624,7 +1633,7 @@ def lambda_handler(event, context):
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="fullres?key={image_key}">Full Res</a>
             </div>
             <h2>{timestamp} UTC</h2>
-            <div class="metadata">{mode_info}</div>
+            <div class="metadata">{mode_info}{diff_display}</div>
             <div class="image-container">
                 <a href="fullres?key={image_key}">
                     <img src="{image_url}" alt="Display width image">
@@ -2703,10 +2712,13 @@ def lambda_handler(event, context):
                     mode = img_stats.get('mode', 'unknown').upper()
                     duration = img_stats.get('capture_duration_seconds', 0)
                     stacked = img_stats.get('stacked', False)
+                    diff_val = img_stats.get('image_diff', 0)
 
                     mode_label = f"{mode} ({int(duration)}s)"
                     if stacked:
                         mode_label += " [6x]"
+                    if diff_val:
+                        mode_label += f" | Δ {float(diff_val):.1f}"
                     mode_display = f" • {mode_label}"
 
                 html += f'''
