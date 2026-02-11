@@ -1502,6 +1502,142 @@ def lambda_handler(event, context):
         }});
         </script>
         '''
+
+    elif path.startswith(f'/{stage}/gardencam/metrics') or path.startswith('/gardencam/metrics'):
+        # Metrics dashboard - diff, brightness, and variance by mode
+        if not check_basic_auth(event, GARDENCAM_PASSWORD):
+            return {
+                'statusCode': 401,
+                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
+                'headers': {
+                    'Content-Type': 'text/html',
+                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
+                }
+            }
+
+        stats = get_gardencam_stats(limit=500)
+
+        # Group by mode and calculate statistics
+        by_mode = {}
+        for item in stats:
+            mode = item.get('mode', 'unknown').lower()
+            diff = float(item.get('image_diff', 0))
+            avg_brightness = float(item.get('avg_brightness', 0))
+            variance = float(item.get('noise_floor', 0))
+
+            if mode not in by_mode:
+                by_mode[mode] = []
+            by_mode[mode].append({
+                'diff': diff,
+                'brightness': avg_brightness,
+                'variance': variance,
+                'filename': item.get('filename', ''),
+                'timestamp': item.get('timestamp', '')
+            })
+
+        html += '''
+        <title>Gardencam Metrics</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
+            .nav { text-align: center; margin-bottom: 1.5rem; }
+            .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }
+            h1 { text-align: center; }
+            .mode-section { max-width: 1000px; margin: 2rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }
+            .mode-title { font-size: 1.3rem; color: #4a9eff; margin-bottom: 1rem; border-bottom: 2px solid #4a9eff; padding-bottom: 0.5rem; }
+            .stats-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+            .stat-box { background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }
+            .stat-label { color: #888; font-size: 0.9rem; margin-bottom: 0.5rem; }
+            .stat-value { font-size: 1.5rem; font-weight: bold; color: #4a9eff; }
+            table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+            th { background: #1a1a1a; padding: 0.8rem; text-align: left; color: #aaa; border-bottom: 1px solid #444; }
+            td { padding: 0.8rem; border-bottom: 1px solid #333; }
+            tr:hover { background: #333; }
+            .no-data { text-align: center; color: #666; padding: 2rem; }
+        </style>
+        <div class="nav">
+            <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="stats">Charts</a>
+        </div>
+        <h1>Gardencam Metrics by Mode</h1>
+        '''
+
+        for mode in ['day', 'night', 'stacking']:
+            if mode not in by_mode or not by_mode[mode]:
+                continue
+
+            data = by_mode[mode]
+            diffs = [d['diff'] for d in data if d['diff'] > 0]
+            brightnesses = [d['brightness'] for d in data]
+            variances = [d['variance'] for d in data]
+
+            # Calculate statistics
+            if diffs:
+                diff_avg = sum(diffs) / len(diffs)
+                diff_min = min(diffs)
+                diff_max = max(diffs)
+            else:
+                diff_avg = diff_min = diff_max = 0
+
+            bright_avg = sum(brightnesses) / len(brightnesses) if brightnesses else 0
+            bright_min = min(brightnesses) if brightnesses else 0
+            bright_max = max(brightnesses) if brightnesses else 0
+
+            var_avg = sum(variances) / len(variances) if variances else 0
+            var_min = min(variances) if variances else 0
+            var_max = max(variances) if variances else 0
+
+            mode_label = mode.upper()
+            if mode == 'stacking':
+                mode_label += ' (6-frame stack)'
+
+            html += f'''
+            <div class="mode-section">
+                <div class="mode-title">{mode_label} - Last {len(data)} captures</div>
+                <div class="stats-summary">
+                    <div class="stat-box">
+                        <div class="stat-label">Diff (Δ)</div>
+                        <div class="stat-value">{diff_avg:.2f}</div>
+                        <div style="font-size: 0.8rem; color: #666;">Avg (min: {diff_min:.2f}, max: {diff_max:.2f})</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Brightness</div>
+                        <div class="stat-value">{bright_avg:.0f}</div>
+                        <div style="font-size: 0.8rem; color: #666;">Avg (range: {bright_min:.0f}-{bright_max:.0f})</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Variance</div>
+                        <div class="stat-value">{var_avg:.1f}</div>
+                        <div style="font-size: 0.8rem; color: #666;">Noise floor (range: {var_min:.1f}-{var_max:.1f})</div>
+                    </div>
+                </div>
+                <table>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Diff (Δ)</th>
+                        <th>Brightness</th>
+                        <th>Variance</th>
+                    </tr>
+            '''
+
+            # Show recent 10 captures for this mode
+            for item in data[:10]:
+                ts = item['timestamp'].split('T')[1][:8] if 'T' in item['timestamp'] else item['timestamp']
+                html += f'''
+                    <tr>
+                        <td>{ts}</td>
+                        <td>{item["diff"]:.2f}</td>
+                        <td>{item["brightness"]:.0f}</td>
+                        <td>{item["variance"]:.1f}</td>
+                    </tr>
+                '''
+
+            html += '''
+                </table>
+            </div>
+            '''
+
+        html += '''
+        '''
+
     elif path.startswith(f'/{stage}/gardencam/fullres') or path.startswith('/gardencam/fullres'):
         # Full resolution image view
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -2639,6 +2775,7 @@ def lambda_handler(event, context):
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
             <a href="gardencam/videos" class="gallery-link" style="margin-left: 0.5rem;">🎬 Timelapse Videos</a>
             <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">Capture Stats</a>
+            <a href="gardencam/metrics" class="gallery-link" style="margin-left: 0.5rem;">📊 Metrics</a>
             <a href="gardencam/s3-stats" class="gallery-link" style="margin-left: 0.5rem;">Storage Stats</a>
             <button id="captureBtn" class="gallery-link" style="margin-left: 0.5rem; cursor: pointer;">📷 Capture Now</button>
             <div id="captureStatus" style="margin-top: 0.5rem; font-size: 0.9rem;"></div>
