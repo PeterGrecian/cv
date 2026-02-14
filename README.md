@@ -2,18 +2,119 @@
 ## code to publish my Curriculum Vitae and Garden Camera
 Lambda is used to publish web pages via API gateway.  If the website gets more complicated I'll use Flask.
 
+## Deployment Architecture
+
+### Lambda Functions & API Gateways
+
+The cv codebase supports multiple deployment environments:
+
+| Environment | Lambda | API Gateway | Domain | Purpose |
+|---|---|---|---|---|
+| **Production** | `cvdev` | `cvdev` (HTTP API v2) | `w3.petergrecian.co.uk` | Live website |
+| **Experimental** | `cv-experimental` | `cv-experimental` (HTTP API v2) | Direct invocation | Testing new features |
+
+### Deployment Process
+
+**Using the `./update` Script**:
+
+The `update` script automates deployment to Lambda:
+
+```bash
+./update
+```
+
+This:
+1. Validates Python syntax with `py_compile`
+2. Executes `cv.py` locally to test routes work
+3. Generates `gitinfo.html` with git commit information (visible at `/gitinfo`)
+4. Compresses all files (`*.py`, `*.html`, images) into `cv.zip`
+5. Uploads to Lambda function specified in script (line 49)
+6. Shows Lambda code size for verification
+
+**Production Deployment (`w3.petergrecian.co.uk`)**:
+
+1. Edit `cv.py` locally
+2. Test locally: `python cv.py` (checks all routes work)
+3. Run `./update` (deploys to `cvdev` Lambda)
+4. Verify at `https://w3.petergrecian.co.uk`
+5. Check `/gitinfo` endpoint to confirm git commit deployed
+6. Commit changes: `git commit && git push`
+
+**Experimental/Testing Setup**:
+
+To use `cv-experimental` for testing before production:
+
+1. Edit `./update` script, line 49-50:
+   ```bash
+   #fn=cvdev              # Temporarily comment out
+   fn=cv-experimental    # Use experimental instead
+   ```
+
+2. Run `./update` to deploy to experimental Lambda
+
+3. Test via direct Lambda invocation:
+   ```bash
+   aws lambda invoke --function-name cv-experimental \
+     --payload '{"path":"/gardencam/videos",...}' \
+     response.json
+   ```
+
+4. Once tested successfully:
+   - Revert `./update` script back to `fn=cvdev`
+   - Run `./update` to deploy to production
+   - Verify `/gitinfo` shows new commit
+
+**Recommended Workflow**:
+```bash
+./update              # Deploy to experimental
+# Test at https://experimental-api-endpoint/ (if configured)
+git commit            # Commit changes locally
+./update              # Deploy to production (cvdev)
+git push              # Push to GitHub
+```
+
+### IAM & Security
+
+Both Lambda functions use the same code (`cv.py`) but have separate roles:
+- **cvdev role**: Full production permissions (Secrets Manager, DynamoDB, S3, CloudWatch)
+- **cv-experimental role**: Same permissions for testing
+
+Both roles grant access to:
+- AWS Secrets Manager: `gardencam/password` and `tfl/api-key`
+- DynamoDB: `cv-access-logs`, `gardencam-*` tables, `lambda-execution-logs`
+- S3: `gardencam-berrylands-eu-west-1` bucket
+- CloudWatch Logs: Full write access
+
+### Path Matching Gotcha
+
+**Important**: The `/gardencam/video` and `/gardencam/videos` endpoints require careful path matching:
+- `/gardencam/video` - Single video player (requires `?id=` query parameter)
+- `/gardencam/videos` - Video gallery listing (no parameters)
+
+Use `.startswith()` with caution since `"/gardencam/videos".startswith("/gardencam/video")` is True. See cv.py line 2422 for the correct pattern.
+
 ### Routes
+
+**General**:
 - `/` - CV (default)
 - `/contents` - Site contents/index (redesigned with pastel ellipse buttons)
 - `/event` - Debug info showing Lambda event and context
 - `/gitinfo` - Git commit information for deployed code
-- `/gardencam` - Password-protected garden camera (displays latest 3 images, capture button)
+
+**Garden Camera (Password Protected)**:
+- `/gardencam` - Latest 3 images with capture button
 - `/gardencam/capture` - API endpoint to trigger remote capture (POST)
 - `/gardencam/gallery` - Gallery index listing all 4-hour periods
 - `/gardencam/gallery?period=<period>` - Gallery view for specific 4-hour period
 - `/gardencam/display?key=<image_key>` - Display-width view of specific image
 - `/gardencam/fullres?key=<image_key>` - Full resolution view of specific image
-- `/gardencam/stats` - Interactive charts showing brightness statistics over time
+- `/gardencam/stats` - Interactive charts showing brightness statistics
+- `/gardencam/metrics` - Metrics dashboard with diff/brightness/variance by mode
+- `/gardencam/timelapse` - Timelapse index and overview
+- `/gardencam/timelapse/schedule` - Automation schedule information
+- `/gardencam/videos` - Video gallery with timelapse videos
+- `/gardencam/video?id=<video_id>` - Single timelapse video player
+- `/gardencam/s3-stats` - S3 storage usage and cost analysis
 
 The script "update" is used to zip and push the assets to AWS.  It provides git info on the website which can be used to confirm the state of the live code.  The pattern of use is:
 ```
@@ -128,5 +229,24 @@ cd ~/Berrylands/gardencam
 
 This adds a cron job that runs every minute to check for capture commands.
 
-### Related Repository
-See `~/Berrylands/gardencam/` for the Raspberry Pi capture script and setup instructions.
+### Relationship with Gardencam Project
+
+The **cv repo is the website frontend** for the Gardencam capture system:
+
+- **Gardencam capture system** (`~/Berrylands/gardencam/`): Raspberry Pi that captures images every 10 minutes, uploads to S3, stores statistics in DynamoDB
+- **cv repo** (this project): Lambda-based website that displays images, allows remote capture, shows statistics and timelapse videos
+
+**Architecture**:
+```
+Raspberry Pi (gardencam.py)
+    ↓ uploads images
+    S3 bucket (gardencam-berrylands-eu-west-1)
+    ↓
+Lambda (cv.py) serves web pages
+    ↓ displays via
+w3.petergrecian.co.uk (API Gateway)
+```
+
+**Important**: If you're modifying `/gardencam/*` routes in `cv.py`, you're changing the website, not the capture system. Changes require a deployment via `./update` script.
+
+See `~/Berrylands/gardencam/CLAUDE.md` for complete Gardencam architecture and setup details.
