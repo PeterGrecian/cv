@@ -2419,7 +2419,7 @@ def lambda_handler(event, context):
         </div>
         '''
 
-    elif path.startswith(f'/{stage}/gardencam/video') or path.startswith('/gardencam/video'):
+    elif (path.startswith(f'/{stage}/gardencam/video?') or path.startswith('/gardencam/video?')) or (path == f'/{stage}/gardencam/video' or path == '/gardencam/video'):
         # Single timelapse video player page
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
             return {
