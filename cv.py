@@ -4,10 +4,10 @@ import base64
 import urllib.request
 from io import BytesIO
 from datetime import datetime, timezone
+import json
 
 try:
     import boto3
-    import json
     BOTO3_AVAILABLE = True
 except ImportError:
     BOTO3_AVAILABLE = False
@@ -1237,7 +1237,6 @@ def lambda_handler(event, context):
         # Page load timing endpoint
         if method == 'POST':
             try:
-                import json
                 from decimal import Decimal
 
                 body = event.get('body', '{}')
@@ -1502,142 +1501,6 @@ def lambda_handler(event, context):
         }});
         </script>
         '''
-
-    elif path.startswith(f'/{stage}/gardencam/metrics') or path.startswith('/gardencam/metrics'):
-        # Metrics dashboard - diff, brightness, and variance by mode
-        if not check_basic_auth(event, GARDENCAM_PASSWORD):
-            return {
-                'statusCode': 401,
-                'body': '<html><body><h1>401 Unauthorized</h1><p>Access denied.</p></body></html>',
-                'headers': {
-                    'Content-Type': 'text/html',
-                    'WWW-Authenticate': 'Basic realm="Garden Camera"'
-                }
-            }
-
-        stats = get_gardencam_stats(limit=500)
-
-        # Group by mode and calculate statistics
-        by_mode = {}
-        for item in stats:
-            mode = item.get('mode', 'unknown').lower()
-            diff = float(item.get('image_diff', 0))
-            avg_brightness = float(item.get('avg_brightness', 0))
-            variance = float(item.get('noise_floor', 0))
-
-            if mode not in by_mode:
-                by_mode[mode] = []
-            by_mode[mode].append({
-                'diff': diff,
-                'brightness': avg_brightness,
-                'variance': variance,
-                'filename': item.get('filename', ''),
-                'timestamp': item.get('timestamp', '')
-            })
-
-        html += '''
-        <title>Gardencam Metrics</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
-            .nav { text-align: center; margin-bottom: 1.5rem; }
-            .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }
-            h1 { text-align: center; }
-            .mode-section { max-width: 1000px; margin: 2rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }
-            .mode-title { font-size: 1.3rem; color: #4a9eff; margin-bottom: 1rem; border-bottom: 2px solid #4a9eff; padding-bottom: 0.5rem; }
-            .stats-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-            .stat-box { background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }
-            .stat-label { color: #888; font-size: 0.9rem; margin-bottom: 0.5rem; }
-            .stat-value { font-size: 1.5rem; font-weight: bold; color: #4a9eff; }
-            table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-            th { background: #1a1a1a; padding: 0.8rem; text-align: left; color: #aaa; border-bottom: 1px solid #444; }
-            td { padding: 0.8rem; border-bottom: 1px solid #333; }
-            tr:hover { background: #333; }
-            .no-data { text-align: center; color: #666; padding: 2rem; }
-        </style>
-        <div class="nav">
-            <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="stats">Charts</a>
-        </div>
-        <h1>Gardencam Metrics by Mode</h1>
-        '''
-
-        for mode in ['day', 'night', 'stacking']:
-            if mode not in by_mode or not by_mode[mode]:
-                continue
-
-            data = by_mode[mode]
-            diffs = [d['diff'] for d in data if d['diff'] > 0]
-            brightnesses = [d['brightness'] for d in data]
-            variances = [d['variance'] for d in data]
-
-            # Calculate statistics
-            if diffs:
-                diff_avg = sum(diffs) / len(diffs)
-                diff_min = min(diffs)
-                diff_max = max(diffs)
-            else:
-                diff_avg = diff_min = diff_max = 0
-
-            bright_avg = sum(brightnesses) / len(brightnesses) if brightnesses else 0
-            bright_min = min(brightnesses) if brightnesses else 0
-            bright_max = max(brightnesses) if brightnesses else 0
-
-            var_avg = sum(variances) / len(variances) if variances else 0
-            var_min = min(variances) if variances else 0
-            var_max = max(variances) if variances else 0
-
-            mode_label = mode.upper()
-            if mode == 'stacking':
-                mode_label += ' (6-frame stack)'
-
-            html += f'''
-            <div class="mode-section">
-                <div class="mode-title">{mode_label} - Last {len(data)} captures</div>
-                <div class="stats-summary">
-                    <div class="stat-box">
-                        <div class="stat-label">Diff (Δ)</div>
-                        <div class="stat-value">{diff_avg:.2f}</div>
-                        <div style="font-size: 0.8rem; color: #666;">Avg (min: {diff_min:.2f}, max: {diff_max:.2f})</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-label">Brightness</div>
-                        <div class="stat-value">{bright_avg:.0f}</div>
-                        <div style="font-size: 0.8rem; color: #666;">Avg (range: {bright_min:.0f}-{bright_max:.0f})</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-label">Variance</div>
-                        <div class="stat-value">{var_avg:.1f}</div>
-                        <div style="font-size: 0.8rem; color: #666;">Noise floor (range: {var_min:.1f}-{var_max:.1f})</div>
-                    </div>
-                </div>
-                <table>
-                    <tr>
-                        <th>Timestamp</th>
-                        <th>Diff (Δ)</th>
-                        <th>Brightness</th>
-                        <th>Variance</th>
-                    </tr>
-            '''
-
-            # Show recent 10 captures for this mode
-            for item in data[:10]:
-                ts = item['timestamp'].split('T')[1][:8] if 'T' in item['timestamp'] else item['timestamp']
-                html += f'''
-                    <tr>
-                        <td>{ts}</td>
-                        <td>{item["diff"]:.2f}</td>
-                        <td>{item["brightness"]:.0f}</td>
-                        <td>{item["variance"]:.1f}</td>
-                    </tr>
-                '''
-
-            html += '''
-                </table>
-            </div>
-            '''
-
-        html += '''
-        '''
-
     elif path.startswith(f'/{stage}/gardencam/fullres') or path.startswith('/gardencam/fullres'):
         # Full resolution image view
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
@@ -1658,31 +1521,6 @@ def lambda_handler(event, context):
             timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
             image_url = get_presigned_url(image_key)
 
-            # Get image stats from DynamoDB
-            stats = None
-            try:
-                dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
-                table = dynamodb.Table('gardencam-stats')
-                response = table.get_item(Key={'filename': image_key})
-                stats = response.get('Item', {})
-            except Exception as e:
-                print(f"Error fetching stats for {image_key}: {e}")
-
-            # Build metadata string
-            mode_info = ""
-            if stats:
-                mode = stats.get('mode', 'unknown').upper()
-                duration = stats.get('capture_duration_seconds', 0)
-                stacked = stats.get('stacked', False)
-                diff_val = stats.get('image_diff', 0)
-
-                mode_label = f"{mode} ({int(duration)}s)"
-                if stacked:
-                    mode_label += " [6-frame stack]"
-                if diff_val:
-                    mode_label += f" | Δ {float(diff_val):.1f}"
-                mode_info = f"<div style='font-size: 0.9rem; color: #888; margin-top: 0.5rem;'>{mode_label}</div>"
-
             html += f'''
             <title>Full Resolution - {timestamp}</title>
             <style>
@@ -1690,14 +1528,13 @@ def lambda_handler(event, context):
                 .nav {{ margin-bottom: 1rem; }}
                 .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
                 .nav a:hover {{ text-decoration: underline; }}
-                h2 {{ margin-bottom: 0.5rem; color: #aaa; }}
+                h2 {{ margin-bottom: 1rem; color: #aaa; }}
                 img {{ max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
             <div class="nav">
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a>
             </div>
             <h2>{timestamp} UTC</h2>
-            {mode_info}
             <img src="{image_url}" alt="Full resolution image">
             '''
         else:
@@ -1722,37 +1559,6 @@ def lambda_handler(event, context):
             timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
             image_url = get_presigned_url(image_key)
 
-            # Get image stats from DynamoDB
-            stats = None
-            try:
-                dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
-                table = dynamodb.Table('gardencam-stats')
-                response = table.get_item(Key={'filename': image_key})
-                stats = response.get('Item', {})
-            except Exception as e:
-                print(f"Error fetching stats for {image_key}: {e}")
-
-            # Build metadata string
-            metadata = f"{timestamp} UTC"
-            if stats:
-                mode = stats.get('mode', 'unknown').upper()
-                duration = stats.get('capture_duration_seconds', 0)
-                stacked = stats.get('stacked', False)
-
-                mode_label = f"{mode} ({int(duration)}s)"
-                if stacked:
-                    mode_label += " [6-frame stack]"
-                metadata = f"{timestamp} UTC | {mode_label}"
-
-            # Extract mode info from metadata
-            mode_info = metadata.split(" UTC | ")[1] if " UTC | " in metadata else ""
-
-            # Add diff value if available
-            diff_display = ""
-            if stats and 'image_diff' in stats:
-                diff_val = float(stats.get('image_diff', 0))
-                diff_display = f" | Δ {diff_val:.1f}"
-
             html += f'''
             <title>Display Width - {timestamp}</title>
             <style>
@@ -1761,7 +1567,6 @@ def lambda_handler(event, context):
                 .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
                 .nav a:hover {{ text-decoration: underline; }}
                 h2 {{ margin-bottom: 1rem; color: #aaa; }}
-                .metadata {{ font-size: 0.9rem; color: #888; margin-bottom: 1rem; }}
                 .image-container {{ max-width: 1920px; margin: 0 auto; }}
                 img {{ width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
@@ -1769,7 +1574,6 @@ def lambda_handler(event, context):
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="fullres?key={image_key}">Full Res</a>
             </div>
             <h2>{timestamp} UTC</h2>
-            <div class="metadata">{mode_info}{diff_display}</div>
             <div class="image-container">
                 <a href="fullres?key={image_key}">
                     <img src="{image_url}" alt="Display width image">
@@ -2419,8 +2223,9 @@ def lambda_handler(event, context):
         </div>
         '''
 
-    elif (path.startswith(f'/{stage}/gardencam/video?') or path.startswith('/gardencam/video?')) or (path == f'/{stage}/gardencam/video' or path == '/gardencam/video'):
-        # Single timelapse video player page
+    elif (path.startswith(f'/{stage}/gardencam/video?') or path.startswith('/gardencam/video?') or
+          path == f'/{stage}/gardencam/video' or path == '/gardencam/video'):
+        # Single timelapse video player page (not /videos)
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
             return {
                 'statusCode': 401,
@@ -2775,7 +2580,6 @@ def lambda_handler(event, context):
             <a href="gardencam/gallery" class="gallery-link">View Full Gallery</a>
             <a href="gardencam/videos" class="gallery-link" style="margin-left: 0.5rem;">🎬 Timelapse Videos</a>
             <a href="gardencam/stats" class="gallery-link" style="margin-left: 0.5rem;">Capture Stats</a>
-            <a href="gardencam/metrics" class="gallery-link" style="margin-left: 0.5rem;">📊 Metrics</a>
             <a href="gardencam/s3-stats" class="gallery-link" style="margin-left: 0.5rem;">Storage Stats</a>
             <button id="captureBtn" class="gallery-link" style="margin-left: 0.5rem; cursor: pointer;">📷 Capture Now</button>
             <div id="captureStatus" style="margin-top: 0.5rem; font-size: 0.9rem;"></div>
@@ -2833,46 +2637,25 @@ def lambda_handler(event, context):
             <div class="gallery">
             '''
             labels = ['Latest', 'Previous', 'Earlier']
-
-            # Fetch stats for all images to get capture duration
-            all_stats = get_gardencam_stats(limit=10)
-            stats_by_filename = {s.get('filename'): s for s in all_stats}
-
             for idx, img in enumerate(images):
                 label = labels[idx] if idx < len(labels) else f'Image {idx+1}'
                 resolution_display = f" • {img['resolution']}" if img.get('resolution') else ""
-
-                # Get stats for this image
-                img_stats = stats_by_filename.get(img['key'], {})
-                mode_display = ""
-                if img_stats:
-                    mode = img_stats.get('mode', 'unknown').upper()
-                    duration = img_stats.get('capture_duration_seconds', 0)
-                    stacked = img_stats.get('stacked', False)
-                    diff_val = img_stats.get('image_diff', 0)
-
-                    mode_label = f"{mode} ({int(duration)}s)"
-                    if stacked:
-                        mode_label += " [6x]"
-                    if diff_val:
-                        mode_label += f" | Δ {float(diff_val):.1f}"
-                    mode_display = f" • {mode_label}"
-
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
                     <a href="gardencam/display?key={img['key']}">
                         <img src="{img['url']}" alt="{label} capture">
                     </a>
-                    <p class="timestamp">{img['timestamp']}{resolution_display}{mode_display}</p>
+                    <p class="timestamp">{img['timestamp']}{resolution_display}</p>
                 </div>
                 '''
             html += '</div>'
         else:
             html += '<title>Garden Camera</title><h1>Garden Camera</h1><p>No images available yet.</p>'
 
-    elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
-        # Lambda statistics - CloudWatch metrics + DynamoDB analysis (paths, IPs, user agents)
+    elif path == f'/{stage}/lambda-stats/data' or path == '/lambda-stats/data':
+        # Lambda statistics data endpoint - returns JSON
+        # This does all the slow data fetching and returns it as JSON
         all_lambda_metrics = get_all_lambda_metrics(days=30)
 
         # Calculate aggregated stats
@@ -2947,173 +2730,371 @@ def lambda_handler(event, context):
         total_requests = sum(path_counts.values())
         top_paths = path_counts.most_common(10)
 
-        html += f'''
+        # Generate histogram data for last 7 days with 28 buckets (6-hour intervals)
+        # Aligned to midnight, 6am, noon, 6pm
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+
+        # Find midnight 7 days ago
+        seven_days_ago = now - timedelta(days=7)
+        midnight_7_days_ago = seven_days_ago.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        bucket_duration = timedelta(hours=6)  # 6-hour buckets: 0-6, 6-12, 12-18, 18-24
+
+        # Create 28 time buckets aligned to 0, 6, 12, 18 hours
+        buckets = []
+        for i in range(28):
+            bucket_start = midnight_7_days_ago + (i * bucket_duration)
+            bucket_end = bucket_start + bucket_duration
+            # Calculate days ago from the middle of the bucket
+            bucket_mid = bucket_start + (bucket_duration / 2)
+            days_ago = (now - bucket_mid).total_seconds() / 86400
+            buckets.append({
+                'start': bucket_start,
+                'end': bucket_end,
+                'label': f'{days_ago:.1f}',
+                'paths': Counter()
+            })
+
+        # Assign items to buckets
+        for item in stats:
+            timestamp_str = item.get('timestamp', '')
+            path = item.get('path', '')
+            if not timestamp_str or not path:
+                continue
+
+            try:
+                ts = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                if ts < midnight_7_days_ago:
+                    continue  # Skip items older than 7 days (before midnight)
+
+                # Find the correct bucket
+                for bucket in buckets:
+                    if bucket['start'] <= ts < bucket['end']:
+                        bucket['paths'][path] += 1
+                        break
+            except:
+                continue
+
+        # Get top 10 paths overall for the legend
+        recent_path_counts = Counter()
+        for bucket in buckets:
+            recent_path_counts.update(bucket['paths'])
+        top_recent_paths = [path for path, _ in recent_path_counts.most_common(10)]
+
+        # Prepare histogram data
+        histogram_data = {
+            'labels': [bucket['label'] for bucket in buckets],
+            'datasets': []
+        }
+
+        # Create a dataset for each top path
+        colors = [
+            '#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b',
+            '#fa709a', '#fee140', '#30cfd0', '#a8edea', '#fed6e3'
+        ]
+
+        for i, path in enumerate(top_recent_paths):
+            dataset = {
+                'label': path if path else '(root)',
+                'data': [bucket['paths'].get(path, 0) for bucket in buckets],
+                'backgroundColor': colors[i % len(colors)]
+            }
+            histogram_data['datasets'].append(dataset)
+
+        # Return JSON data
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'summary': {
+                    'total_invocations': int(total_cw_invocations),
+                    'total_errors': int(total_cw_errors),
+                    'total_throttles': int(total_cw_throttles),
+                    'error_rate': round(error_rate, 2),
+                    'avg_duration': round(avg_cw_duration, 0),
+                    'max_duration': round(max_cw_duration, 0)
+                },
+                'functions': [
+                    {
+                        'name': func_name,
+                        'invocations': int(func_metrics['invocations']),
+                        'errors': int(func_metrics['errors']),
+                        'error_rate': round(func_metrics['error_rate'], 2),
+                        'avg_duration': round(func_metrics['avg_duration'], 0),
+                        'max_duration': round(func_metrics['max_duration'], 0)
+                    }
+                    for func_name, func_metrics in sorted_functions
+                ],
+                'paths': [
+                    {
+                        'path': path,
+                        'count': count,
+                        'percentage': round((count / total_requests * 100) if total_requests > 0 else 0, 1)
+                    }
+                    for path, count in top_paths
+                ],
+                'ips': ip_geo_data,
+                'user_agents': [
+                    {'user_agent': ua, 'count': count}
+                    for ua, count in top_uas
+                ],
+                'histogram': histogram_data
+            }),
+            'headers': {'Content-Type': 'application/json'}
+        }
+
+    elif path == f'/{stage}/lambda-stats' or path == '/lambda-stats':
+        # Lambda statistics page - returns HTML skeleton that loads data asynchronously
+
+        html += '''
         <!DOCTYPE html>
         <html lang="en">
         <head>
         <meta charset="UTF-8">
         <title>Lambda CloudWatch Metrics</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
         <style>
-            body {{ font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }}
-            h1 {{ color: #333; }}
-            .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-            table {{ width: 100%; border-collapse: collapse; margin: 2rem 0; }}
-            th, td {{ padding: 0.75rem; text-align: left; border-bottom: 1px solid #ddd; }}
-            th {{ background: #667eea; color: white; font-weight: 600; }}
-            tr:hover {{ background: #f8f9fa; }}
-            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }}
-            .stat-box {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 8px; text-align: center; color: white; }}
-            .stat-value {{ font-size: 2rem; font-weight: bold; }}
-            .stat-label {{ margin-top: 0.5rem; opacity: 0.9; }}
-            .nav {{ text-align: center; margin-bottom: 2rem; }}
-            .nav a {{ color: #667eea; text-decoration: none; padding: 0.5rem 1rem; background: #f0f0f0; border-radius: 4px; }}
+            body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }
+            h1 { color: #333; }
+            .container { max-width: 1200px; margin: 0 auto; background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            table { width: 100%; border-collapse: collapse; margin: 2rem 0; }
+            th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background: #667eea; color: white; font-weight: 600; }
+            tr:hover { background: #f8f9fa; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+            .stat-box { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 1.5rem; border-radius: 8px; text-align: center; color: white; }
+            .stat-value { font-size: 2rem; font-weight: bold; }
+            .stat-label { margin-top: 0.5rem; opacity: 0.9; }
+            .nav { text-align: center; margin-bottom: 2rem; }
+            .nav a { color: #667eea; text-decoration: none; padding: 0.5rem 1rem; background: #f0f0f0; border-radius: 4px; }
+            .loading { text-align: center; padding: 2rem; color: #666; }
+            .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 1rem auto; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            .error { background: #fee; padding: 1rem; border-radius: 4px; color: #c00; margin: 1rem 0; }
+            .chart-container { margin: 2rem 0; padding: 1rem; background: #f8f9fa; border-radius: 8px; }
         </style>
         </head>
         <body>
         <div class="container">
             <div class="nav"><a href="../contents">← Home</a></div>
             <h1>📊 Lambda CloudWatch Metrics (Last 30 Days)</h1>
-            
-            <div class="stats-grid">
-                <div class="stat-box">
-                    <div class="stat-value">{int(total_cw_invocations):,}</div>
-                    <div class="stat-label">Total Invocations</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{int(total_cw_errors):,}</div>
-                    <div class="stat-label">Errors</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{int(total_cw_throttles):,}</div>
-                    <div class="stat-label">Throttles</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{error_rate:.2f}%</div>
-                    <div class="stat-label">Error Rate</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{avg_cw_duration:.0f}ms</div>
-                    <div class="stat-label">Avg Duration</div>
-                </div>
-                <div class="stat-box">
-                    <div class="stat-value">{max_cw_duration:.0f}ms</div>
-                    <div class="stat-label">Max Duration</div>
-                </div>
+
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading statistics data...</p>
             </div>
-            
-            <h2>Functions by Invocation Count</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Function Name</th>
-                        <th>Invocations</th>
-                        <th>Errors</th>
-                        <th>Error Rate</th>
-                        <th>Avg Duration (ms)</th>
-                        <th>Max Duration (ms)</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-        
-        for func_name, func_metrics in sorted_functions:
-            html += f'''
-                    <tr>
-                        <td><strong>{func_name}</strong></td>
-                        <td>{int(func_metrics['invocations']):,}</td>
-                        <td>{int(func_metrics['errors']):,}</td>
-                        <td>{func_metrics['error_rate']:.2f}%</td>
-                        <td>{func_metrics['avg_duration']:.0f}</td>
-                        <td>{func_metrics['max_duration']:.0f}</td>
-                    </tr>
-            '''
-        
-        html += '''
-                </tbody>
-            </table>
 
-            <h2>📍 Path Analysis (Top Endpoints)</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Path</th>
-                        <th>Requests</th>
-                        <th>Percentage</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
+            <div id="content" style="display: none;">
+                <div class="stats-grid" id="summary-stats"></div>
 
-        for path, count in top_paths:
-            percentage = (count / total_requests * 100) if total_requests > 0 else 0
-            html += f'''
-                    <tr>
-                        <td><code>{path}</code></td>
-                        <td>{count:,}</td>
-                        <td>{percentage:.1f}%</td>
-                    </tr>
-            '''
+                <h2>📈 Path Usage - Last 7 Days (28 × 6-hour buckets)</h2>
+                <div class="chart-container">
+                    <canvas id="histogramChart"></canvas>
+                </div>
 
-        html += '''
-                </tbody>
-            </table>
+                <h2>Functions by Invocation Count</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Function Name</th>
+                            <th>Invocations</th>
+                            <th>Errors</th>
+                            <th>Error Rate</th>
+                            <th>Avg Duration (ms)</th>
+                            <th>Max Duration (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="functions-tbody"></tbody>
+                </table>
 
-            <h2>🌍 IP Address Analysis with Geolocation</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>IP Address</th>
-                        <th>Country</th>
-                        <th>City</th>
-                        <th>Requests</th>
-                        <th>Top Path</th>
-                        <th>User-Agent</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
+                <h2>📍 Path Analysis (Top Endpoints)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Path</th>
+                            <th>Requests</th>
+                            <th>Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paths-tbody"></tbody>
+                </table>
 
-        for ip_info in ip_geo_data:
-            ua_short = (ip_info['top_ua'][:80] + '...') if len(ip_info['top_ua']) > 80 else ip_info['top_ua']
-            html += f'''
-                    <tr>
-                        <td><code>{ip_info['ip']}</code></td>
-                        <td>{ip_info['country']}</td>
-                        <td>{ip_info['city']}</td>
-                        <td>{ip_info['count']:,}</td>
-                        <td><code>{ip_info['top_path'] if ip_info['top_path'] else '(root)'}</code></td>
-                        <td style="font-size: 0.85rem;">{ua_short}</td>
-                    </tr>
-            '''
+                <h2>🌍 IP Address Analysis with Geolocation</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>IP Address</th>
+                            <th>Country</th>
+                            <th>City</th>
+                            <th>Requests</th>
+                            <th>Top Path</th>
+                            <th>User-Agent</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ips-tbody"></tbody>
+                </table>
 
-        html += '''
-                </tbody>
-            </table>
-
-            <h2>📱 Top User-Agents (Browsers/Devices)</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>User-Agent</th>
-                        <th>Requests</th>
-                    </tr>
-                </thead>
-                <tbody>
-        '''
-
-        for ua, count in top_uas:
-            ua_display = (ua[:120] + '...') if len(ua) > 120 else ua
-            html += f'''
-                    <tr>
-                        <td style="font-size: 0.9rem; word-break: break-all;">{ua_display}</td>
-                        <td>{count:,}</td>
-                    </tr>
-            '''
-
-        html += '''
-                </tbody>
-            </table>
+                <h2>📱 Top User-Agents (Browsers/Devices)</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User-Agent</th>
+                            <th>Requests</th>
+                        </tr>
+                    </thead>
+                    <tbody id="uas-tbody"></tbody>
+                </table>
+            </div>
         </div>
+
+        <script>
+        async function loadStats() {
+            try {
+                const response = await fetch('./lambda-stats/data');
+                if (!response.ok) throw new Error('Failed to load data');
+
+                const data = await response.json();
+
+                // Populate summary stats
+                const summary = data.summary;
+                document.getElementById('summary-stats').innerHTML = `
+                    <div class="stat-box">
+                        <div class="stat-value">${summary.total_invocations.toLocaleString()}</div>
+                        <div class="stat-label">Total Invocations</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${summary.total_errors.toLocaleString()}</div>
+                        <div class="stat-label">Errors</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${summary.total_throttles.toLocaleString()}</div>
+                        <div class="stat-label">Throttles</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${summary.error_rate.toFixed(2)}%</div>
+                        <div class="stat-label">Error Rate</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${Math.round(summary.avg_duration)}ms</div>
+                        <div class="stat-label">Avg Duration</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value">${Math.round(summary.max_duration)}ms</div>
+                        <div class="stat-label">Max Duration</div>
+                    </div>
+                `;
+
+                // Create histogram chart
+                const ctx = document.getElementById('histogramChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: data.histogram.labels,
+                        datasets: data.histogram.datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        aspectRatio: 3,
+                        scales: {
+                            x: {
+                                stacked: true,
+                                title: {
+                                    display: true,
+                                    text: 'Days Ago'
+                                },
+                                ticks: {
+                                    maxRotation: 0,
+                                    minRotation: 0,
+                                    font: { size: 10 }
+                                }
+                            },
+                            y: {
+                                stacked: true,
+                                beginAtZero: true,
+                                title: {
+                                    display: true,
+                                    text: 'Requests'
+                                }
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: { boxWidth: 15, font: { size: 11 } }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Request Volume by Path (Stacked)',
+                                font: { size: 14 }
+                            }
+                        }
+                    }
+                });
+
+                // Populate functions table
+                document.getElementById('functions-tbody').innerHTML = data.functions.map(f => `
+                    <tr>
+                        <td><strong>${f.name}</strong></td>
+                        <td>${f.invocations.toLocaleString()}</td>
+                        <td>${f.errors.toLocaleString()}</td>
+                        <td>${f.error_rate.toFixed(2)}%</td>
+                        <td>${Math.round(f.avg_duration)}</td>
+                        <td>${Math.round(f.max_duration)}</td>
+                    </tr>
+                `).join('');
+
+                // Populate paths table
+                document.getElementById('paths-tbody').innerHTML = data.paths.map(p => `
+                    <tr>
+                        <td><code>${p.path}</code></td>
+                        <td>${p.count.toLocaleString()}</td>
+                        <td>${p.percentage.toFixed(1)}%</td>
+                    </tr>
+                `).join('');
+
+                // Populate IPs table
+                document.getElementById('ips-tbody').innerHTML = data.ips.map(ip => {
+                    const ua = ip.top_ua.length > 80 ? ip.top_ua.substring(0, 80) + '...' : ip.top_ua;
+                    return `
+                        <tr>
+                            <td><code>${ip.ip}</code></td>
+                            <td>${ip.country}</td>
+                            <td>${ip.city}</td>
+                            <td>${ip.count.toLocaleString()}</td>
+                            <td><code>${ip.top_path || '(root)'}</code></td>
+                            <td style="font-size: 0.85rem;">${ua}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // Populate user agents table
+                document.getElementById('uas-tbody').innerHTML = data.user_agents.map(ua => {
+                    const uaDisplay = ua.user_agent.length > 120 ? ua.user_agent.substring(0, 120) + '...' : ua.user_agent;
+                    return `
+                        <tr>
+                            <td style="font-size: 0.9rem; word-break: break-all;">${uaDisplay}</td>
+                            <td>${ua.count.toLocaleString()}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // Hide loading, show content
+                document.querySelector('.loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                document.querySelector('.loading').innerHTML = `
+                    <div class="error">
+                        <strong>Error loading statistics:</strong><br>
+                        ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Load data when page loads
+        loadStats();
+        </script>
         </body>
         </html>
         '''
