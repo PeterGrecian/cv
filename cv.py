@@ -398,13 +398,13 @@ def get_image_stats_by_filename(filename):
 
 
 def format_stats_for_display(stats):
-    """Format brightness and SD for display with 3 significant figures."""
+    """Format brightness and image diff for display with 3 significant figures."""
     if not stats:
         return ""
 
     brightness = float(stats.get('avg_brightness', 0))
-    # Use post-autocontrast SD if available, otherwise pre-AC
-    sd = float(stats.get('noise_floor_post_ac', stats.get('noise_floor', 0)))
+    # Use image_diff (difference from previous image)
+    diff = float(stats.get('image_diff', 0))
 
     # Format to 3 significant figures
     from decimal import Decimal
@@ -416,9 +416,9 @@ def format_stats_for_display(stats):
         return f"{d:.{sig_figs}g}"
 
     brightness_str = format_sig_figs(brightness)
-    sd_str = format_sig_figs(sd)
+    diff_str = format_sig_figs(diff)
 
-    return f" | B:{brightness_str} SD:{sd_str}"
+    return f" | B:{brightness_str} Δ:{diff_str}"
 
 
 def get_all_lambda_functions():
