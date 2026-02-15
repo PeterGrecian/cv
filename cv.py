@@ -2371,23 +2371,37 @@ def lambda_handler(event, context):
                         video_id = key.replace('videos/', '').replace('.mp4', '')
                         date_part = video_id.replace('timelapse_', '')
                         try:
-                            start_date, end_date = date_part.split('-')
+                            if '-' in date_part:
+                                # Weekly format
+                                start_date, end_date = date_part.split('-')
+                                video_type = 'weekly'
+                            else:
+                                # Daily format
+                                start_date = date_part
+                                end_date = date_part
+                                video_type = 'daily'
+
                             start_formatted = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
                             end_formatted = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
                         except:
                             start_formatted = "Unknown"
                             end_formatted = "Unknown"
+                            video_type = 'unknown'
 
                         videos.append({
                             'id': video_id,
                             'key': key,
                             'size_mb': obj['Size'] / 1048576,
                             'start_date': start_formatted,
-                            'end_date': end_formatted
+                            'end_date': end_formatted,
+                            'type': video_type
                         })
 
             videos.sort(key=lambda v: v['id'], reverse=True)
-            latest_videos = videos[:3]
+            weekly_videos = [v for v in videos if v['type'] == 'weekly']
+            daily_videos = [v for v in videos if v['type'] == 'daily']
+            latest_weekly = weekly_videos[:3]
+            latest_daily = daily_videos[:3]
             total_videos = len(videos)
 
         except Exception as e:
@@ -2432,7 +2446,11 @@ def lambda_handler(event, context):
 
             <div class="info-section">
                 <h2>Overview</h2>
-                <p>Automated weekly timelapse videos created from garden camera images. Each video condenses a week of captures into a smooth 20-second timelapse.</p>
+                <p>Automated timelapse videos created from garden camera images:</p>
+                <ul style="color: #aaa; margin: 1rem 0;">
+                    <li><strong>Weekly:</strong> 7 days condensed, 24fps, ~5 seconds</li>
+                    <li><strong>Daily:</strong> 24 hours, 12fps, all captures shown</li>
+                </ul>
 
                 <div class="stats">
                     <div class="stat-box">
@@ -2440,16 +2458,12 @@ def lambda_handler(event, context):
                         <div class="stat-label">Total Videos</div>
                     </div>
                     <div class="stat-box">
-                        <div class="stat-value">20s</div>
-                        <div class="stat-label">Duration Each</div>
+                        <div class="stat-value">{len(weekly_videos)}</div>
+                        <div class="stat-label">Weekly</div>
                     </div>
                     <div class="stat-box">
-                        <div class="stat-value">480</div>
-                        <div class="stat-label">Frames Each</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-value">24fps</div>
-                        <div class="stat-label">Frame Rate</div>
+                        <div class="stat-value">{len(daily_videos)}</div>
+                        <div class="stat-label">Daily</div>
                     </div>
                 </div>
 
@@ -2460,18 +2474,38 @@ def lambda_handler(event, context):
             </div>
 
             <div class="info-section latest-videos">
-                <h2>Latest Videos</h2>
+                <h2>Latest Weekly Videos</h2>
                 <ul class="video-list">
         '''
 
-        for video in latest_videos:
+        for video in latest_weekly:
             html += f'''
                 <li>
                     <div>
-                        <div class="video-title">{video['id'].replace('timelapse_', 'Week of ')}</div>
+                        <div class="video-title">Week of {video['start_date']}</div>
                         <div class="video-date">{video['start_date']} to {video['end_date']} • {video['size_mb']:.1f} MB</div>
                     </div>
-                    <a href="videos" class="button">Watch</a>
+                    <a href="video?id={video['id']}" class="button">Watch</a>
+                </li>
+            '''
+
+        html += '''
+                </ul>
+            </div>
+
+            <div class="info-section latest-videos">
+                <h2>Latest Daily Videos</h2>
+                <ul class="video-list">
+        '''
+
+        for video in latest_daily:
+            html += f'''
+                <li>
+                    <div>
+                        <div class="video-title">{video['start_date']}</div>
+                        <div class="video-date">{video['size_mb']:.1f} MB</div>
+                    </div>
+                    <a href="video?id={video['id']}" class="button">Watch</a>
                 </li>
             '''
 
