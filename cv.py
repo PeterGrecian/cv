@@ -3,7 +3,7 @@ import os
 import base64
 import urllib.request
 from io import BytesIO
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json
 
 try:
@@ -203,7 +203,6 @@ def get_all_gardencam_images(max_keys=None):
     if max_keys and max_keys < 100:
         # Fast path: fetch recent pages only
         # Start from current date and work backwards
-        from datetime import datetime, timedelta
         all_objects = []
 
         # Try last 7 days worth of prefixes
@@ -307,12 +306,18 @@ def get_latest_gardencam_images(count=3):
 
         # Skip resolution lookup - not worth 600ms per page load for cosmetic info
         # Users can see resolution when clicking through to full image
+
+        # Fetch stats for this image
+        stats = get_image_stats_by_filename(img['key'])
+        stats_display = format_stats_for_display(stats)
+
         images.append({
             'url': display_url,
             'full_url': full_url,
             'timestamp': img['timestamp'],
             'key': img['key'],
-            'resolution': ''  # Skipped for performance
+            'resolution': '',  # Skipped for performance
+            'stats_display': stats_display
         })
 
     print(f"[TIMING] URL generation + DynamoDB lookups took {(time.time()-t1)*1000:.0f}ms")
@@ -369,6 +374,53 @@ def get_gardencam_stats(limit=500):
         return []
 
 
+def get_image_stats_by_filename(filename):
+    """Get statistics for a specific image from DynamoDB."""
+    if not BOTO3_AVAILABLE:
+        return None
+
+    try:
+        # Extract just the filename without path
+        if '/' in filename:
+            filename = filename.split('/')[-1]
+        # Remove thumb_ prefix if present
+        if filename.startswith('thumb_'):
+            filename = filename[6:]
+
+        dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+        table = dynamodb.Table('gardencam-stats')
+
+        response = table.get_item(Key={'filename': filename})
+        return response.get('Item')
+    except Exception as e:
+        print(f"Error fetching stats for {filename}: {e}")
+        return None
+
+
+def format_stats_for_display(stats):
+    """Format brightness and SD for display with 3 significant figures."""
+    if not stats:
+        return ""
+
+    brightness = float(stats.get('avg_brightness', 0))
+    # Use post-autocontrast SD if available, otherwise pre-AC
+    sd = float(stats.get('noise_floor_post_ac', stats.get('noise_floor', 0)))
+
+    # Format to 3 significant figures
+    from decimal import Decimal
+
+    def format_sig_figs(value, sig_figs=3):
+        if value == 0:
+            return "0.00"
+        d = Decimal(str(value))
+        return f"{d:.{sig_figs}g}"
+
+    brightness_str = format_sig_figs(brightness)
+    sd_str = format_sig_figs(sd)
+
+    return f" | B:{brightness_str} SD:{sd_str}"
+
+
 def get_all_lambda_functions():
     """Get list of all Lambda functions."""
     if not BOTO3_AVAILABLE:
@@ -394,7 +446,6 @@ def get_cloudwatch_metrics(function_name, days=30):
         return {}
 
     try:
-        from datetime import timedelta
         cloudwatch = boto3.client('cloudwatch', region_name=GARDENCAM_REGION)
 
         end_time = datetime.utcnow()
@@ -1294,64 +1345,62 @@ def lambda_handler(event, context):
                 }
             }
 
-        stats = get_gardencam_stats(limit=500)
+        # Fetch more stats to ensure we have enough data for 8 days
+        stats = get_gardencam_stats(limit=2000)
 
-        # Prepare data for Chart.js
-        # Note on noise floor and autocontrast:
-        # - SD (noise floor) is NOT affected by shifts but IS affected by scaling
-        # - Autocontrast scales by 255/(max-min), so post_ac_sd = pre_ac_sd * 255/dynamic_range
-        # - We use noise_floor_post_ac for the chart so all values are comparable
-        #   (including manually measured averaged images which were measured after autocontrast)
-        timestamps = []
-        avg_brightness_data = []
-        peak_brightness_data = []
-        noise_floor_data = []  # Post-autocontrast SD for comparability
-        noise_floor_pre_ac = []  # Pre-autocontrast SD (raw)
-        modes = []
+        # Get current time and define 8 time windows (last 24h + 7 previous days)
+        now = datetime.now(timezone.utc)
 
-        for item in reversed(stats):  # Reverse to show oldest first in chart
-            ts = item.get('timestamp', '')
-            if ts:
-                # Format timestamp for display (just date and time, no milliseconds)
-                try:
-                    dt_str = ts.split('.')[0].replace('T', ' ')
-                    timestamps.append(dt_str)
-                except:
-                    timestamps.append(ts)
+        # Define 8 windows: today (last 24h), yesterday, day before, etc.
+        windows = []
+        for i in range(8):
+            window_end = now - timedelta(days=i)
+            window_start = window_end - timedelta(days=1)
+            windows.append({
+                'start': window_start,
+                'end': window_end,
+                'label': f'{window_start.strftime("%Y-%m-%d")} to {window_end.strftime("%Y-%m-%d")}' if i > 0 else 'Last 24 Hours',
+                'data': []
+            })
 
-                avg_brightness_data.append(float(item.get('avg_brightness', 0)))
-                peak_brightness_data.append(float(item.get('peak_brightness', 0)))
-                # Use post-autocontrast noise floor if available, fall back to pre-AC
-                post_ac = item.get('noise_floor_post_ac')
-                pre_ac = float(item.get('noise_floor', 0))
-                if post_ac is not None:
-                    noise_floor_data.append(float(post_ac))
-                else:
-                    # Old data without post_ac: estimate it from pre_ac and dynamic range
-                    min_b = float(item.get('min_brightness', 0))
-                    max_b = float(item.get('peak_brightness', 255))
-                    dynamic_range = max_b - min_b
-                    if dynamic_range > 0:
-                        noise_floor_data.append(pre_ac * 255.0 / dynamic_range)
-                    else:
-                        noise_floor_data.append(pre_ac)
-                noise_floor_pre_ac.append(pre_ac)
-                modes.append(item.get('mode', 'unknown'))
+        # Group stats into windows
+        for item in stats:
+            ts_str = item.get('timestamp', '')
+            if not ts_str:
+                continue
 
-        # Get averaged images data for noise floor comparison
-        averaged_timestamps = []
-        averaged_noise_floor = []
+            try:
+                # Parse ISO timestamp
+                ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
 
-        # Known averaged images (measured after autocontrast, comparable to noise_floor_post_ac)
-        known_averaged = [
-            ('2026-01-20 06:00:00', 41.5),  # averaged_20260120_04-07.jpg (24 images)
-        ]
+                # Find which window this belongs to
+                for window in windows:
+                    if window['start'] <= ts < window['end']:
+                        window['data'].append({
+                            'timestamp': ts,
+                            'timestamp_str': ts.strftime('%H:%M'),
+                            'avg_brightness': float(item.get('avg_brightness', 0)),
+                            'mode': item.get('mode', 'unknown')
+                        })
+                        break
+            except Exception as e:
+                print(f"Error parsing timestamp {ts_str}: {e}")
+                continue
 
-        for ts, noise in known_averaged:
-            averaged_timestamps.append(ts)
-            averaged_noise_floor.append(noise)
+        # Sort data within each window by timestamp
+        for window in windows:
+            window['data'].sort(key=lambda x: x['timestamp'])
 
-        print(f"Showing {len(averaged_timestamps)} averaged images on noise floor chart")
+        # Calculate summary stats
+        total_images = sum(len(w['data']) for w in windows)
+        all_modes = [d['mode'] for w in windows for d in w['data']]
+        day_count = sum(1 for m in all_modes if m == 'day')
+        night_count = sum(1 for m in all_modes if m == 'night')
+        stacking_count = sum(1 for m in all_modes if m == 'stacking')
+        all_brightness = [d['avg_brightness'] for w in windows for d in w['data']]
+        avg_brightness = sum(all_brightness) / len(all_brightness) if all_brightness else 0
 
         html += f'''
         <title>Garden Camera Statistics</title>
@@ -1362,15 +1411,19 @@ def lambda_handler(event, context):
             .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
             .nav a:hover {{ background: #3a3a3a; }}
             h1 {{ text-align: center; margin-bottom: 2rem; }}
-            .chart-container {{ max-width: 1400px; margin: 0 auto 3rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
-            .chart-title {{ font-size: 1.2rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
-            canvas {{ max-height: 400px; }}
+            .chart-container {{ max-width: 1400px; margin: 0 auto 2rem auto; background: #2a2a2a; padding: 1.5rem; border-radius: 8px; }}
+            .chart-title {{ font-size: 1.1rem; margin-bottom: 1rem; color: #aaa; text-align: center; }}
+            .chart-subtitle {{ font-size: 0.9rem; color: #666; text-align: center; margin-top: -0.5rem; margin-bottom: 1rem; }}
+            canvas {{ max-height: 300px; }}
             .stats-summary {{ max-width: 1400px; margin: 0 auto 2rem auto; padding: 1rem; background: #2a2a2a; border-radius: 8px; }}
             .stats-summary h2 {{ margin-top: 0; color: #aaa; }}
             .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }}
             .stat-box {{ background: #1a1a1a; padding: 1rem; border-radius: 6px; text-align: center; }}
             .stat-value {{ font-size: 2rem; font-weight: bold; color: #4a9eff; }}
             .stat-label {{ color: #888; margin-top: 0.5rem; }}
+            .legend {{ text-align: center; margin-bottom: 1rem; }}
+            .legend-item {{ display: inline-block; margin: 0 1rem; }}
+            .legend-color {{ display: inline-block; width: 20px; height: 20px; border-radius: 4px; vertical-align: middle; margin-right: 0.5rem; }}
         </style>
         <div class="nav">
             <a href="../../contents">Home</a>
@@ -1382,134 +1435,196 @@ def lambda_handler(event, context):
         <h1>Garden Camera Statistics</h1>
 
         <div class="stats-summary">
-            <h2>Summary (Last {len(stats)} images)</h2>
+            <h2>Summary (Last 8 Days)</h2>
             <div class="stats-grid">
                 <div class="stat-box">
-                    <div class="stat-value">{len(stats)}</div>
+                    <div class="stat-value">{total_images}</div>
                     <div class="stat-label">Total Images</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value">{sum(1 for m in modes if m == 'day')}</div>
+                    <div class="stat-value">{day_count}</div>
                     <div class="stat-label">Day Mode</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value">{sum(1 for m in modes if m == 'night')}</div>
+                    <div class="stat-value">{night_count}</div>
                     <div class="stat-label">Night Mode</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-value">{sum(avg_brightness_data)/len(avg_brightness_data):.1f}</div>
+                    <div class="stat-value">{stacking_count}</div>
+                    <div class="stat-label">Stacking Mode</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value">{avg_brightness:.1f}</div>
                     <div class="stat-label">Avg Brightness</div>
                 </div>
             </div>
         </div>
 
-        <div class="chart-container">
-            <div class="chart-title">Average Brightness Over Time</div>
-            <canvas id="brightnessChart"></canvas>
+        <div class="legend">
+            <div class="legend-item">
+                <span class="legend-color" style="background: #f59e0b;"></span>
+                <span>Day Mode</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #3b82f6;"></span>
+                <span>Night Mode</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #8b5cf6;"></span>
+                <span>Stacking Mode</span>
+            </div>
         </div>
+        '''
 
+        # Create a chart for each window
+        for i, window in enumerate(windows):
+            if not window['data']:
+                continue
+
+            # Separate data by mode for color coding
+            day_data = []
+            night_data = []
+            stacking_data = []
+            labels = []
+
+            for d in window['data']:
+                labels.append(d['timestamp_str'])
+                if d['mode'] == 'day':
+                    day_data.append(d['avg_brightness'])
+                    night_data.append(None)
+                    stacking_data.append(None)
+                elif d['mode'] == 'stacking':
+                    day_data.append(None)
+                    night_data.append(None)
+                    stacking_data.append(d['avg_brightness'])
+                else:  # night mode
+                    day_data.append(None)
+                    night_data.append(d['avg_brightness'])
+                    stacking_data.append(None)
+
+            chart_id = f'chart_{i}'
+            data_count = len(window['data'])
+
+            html += f'''
         <div class="chart-container">
-            <div class="chart-title">Peak Brightness Over Time</div>
-            <canvas id="peakChart"></canvas>
+            <div class="chart-title">{window['label']}</div>
+            <div class="chart-subtitle">{data_count} images</div>
+            <canvas id="{chart_id}"></canvas>
         </div>
+            '''
 
-        <div class="chart-container">
-            <div class="chart-title">Noise Floor Over Time (Post-Autocontrast SD)</div>
-            <canvas id="noiseChart"></canvas>
-        </div>
-
+        # Add JavaScript to create all charts
+        html += '''
         <script>
-        const timestamps = {json.dumps(timestamps)};
-        const avgBrightness = {json.dumps(avg_brightness_data)};
-        const peakBrightness = {json.dumps(peak_brightness_data)};
-        const noiseFloor = {json.dumps(noise_floor_data)};
-        const averagedTimestamps = {json.dumps(averaged_timestamps)};
-        const averagedNoiseFloor = {json.dumps(averaged_noise_floor)};
-
-        const chartOptions = {{
+        const chartOptions = {
             responsive: true,
             maintainAspectRatio: true,
-            scales: {{
-                x: {{
-                    ticks: {{ color: '#888', maxTicksLimit: 10 }},
-                    grid: {{ color: '#333' }}
-                }},
-                y: {{
-                    ticks: {{ color: '#888' }},
-                    grid: {{ color: '#333' }}
-                }}
-            }},
-            plugins: {{
-                legend: {{ labels: {{ color: '#aaa' }} }}
-            }}
-        }};
+            scales: {
+                x: {
+                    ticks: { color: '#888', maxTicksLimit: 12 },
+                    grid: { color: '#333' }
+                },
+                y: {
+                    min: 0,
+                    max: 255,
+                    ticks: { color: '#888' },
+                    grid: { color: '#333' },
+                    title: {
+                        display: true,
+                        text: 'Uncorrected Brightness',
+                        color: '#aaa'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    callbacks: {
+                        title: function(context) {
+                            return context[0].label;
+                        },
+                        label: function(context) {
+                            return 'Brightness: ' + context.parsed.y.toFixed(1);
+                        }
+                    }
+                }
+            },
+            elements: {
+                point: {
+                    radius: 3,
+                    hoverRadius: 6
+                },
+                line: {
+                    borderWidth: 2
+                }
+            }
+        };
+        '''
 
-        new Chart(document.getElementById('brightnessChart'), {{
+        # Generate chart creation code for each window
+        for i, window in enumerate(windows):
+            if not window['data']:
+                continue
+
+            # Separate data by mode
+            day_data = []
+            night_data = []
+            stacking_data = []
+            labels = []
+
+            for d in window['data']:
+                labels.append(d['timestamp_str'])
+                if d['mode'] == 'day':
+                    day_data.append(d['avg_brightness'])
+                    night_data.append(None)
+                    stacking_data.append(None)
+                elif d['mode'] == 'stacking':
+                    day_data.append(None)
+                    night_data.append(None)
+                    stacking_data.append(d['avg_brightness'])
+                else:  # night mode
+                    day_data.append(None)
+                    night_data.append(d['avg_brightness'])
+                    stacking_data.append(None)
+
+            chart_id = f'chart_{i}'
+
+            html += f'''
+        new Chart(document.getElementById('{chart_id}'), {{
             type: 'line',
             data: {{
-                labels: timestamps,
-                datasets: [{{
-                    label: 'Average Brightness',
-                    data: avgBrightness,
-                    borderColor: '#4a9eff',
-                    backgroundColor: 'rgba(74, 158, 255, 0.1)',
-                    tension: 0.3
-                }}]
-            }},
-            options: chartOptions
-        }});
-
-        new Chart(document.getElementById('peakChart'), {{
-            type: 'line',
-            data: {{
-                labels: timestamps,
-                datasets: [{{
-                    label: 'Peak Brightness',
-                    data: peakBrightness,
-                    borderColor: '#f59e0b',
-                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                    tension: 0.3
-                }}]
-            }},
-            options: chartOptions
-        }});
-
-        // Prepare averaged image data points for scatter plot
-        const averagedDataPoints = averagedTimestamps.map((ts, i) => ({{
-            x: ts,
-            y: averagedNoiseFloor[i]
-        }}));
-
-        new Chart(document.getElementById('noiseChart'), {{
-            type: 'line',
-            data: {{
-                labels: timestamps,
+                labels: {json.dumps(labels)},
                 datasets: [
                     {{
-                        label: 'Noise Floor (Post-AC SD)',
-                        data: noiseFloor,
-                        borderColor: '#10b981',
-                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                        tension: 0.3,
-                        type: 'line',
-                        order: 2
+                        label: 'Day',
+                        data: {json.dumps(day_data)},
+                        borderColor: '#f59e0b',
+                        backgroundColor: '#f59e0b',
+                        spanGaps: false
                     }},
                     {{
-                        label: 'Averaged Images (Expected)',
-                        data: averagedDataPoints,
-                        borderColor: '#ef4444',
-                        backgroundColor: '#ef4444',
-                        pointRadius: 12,
-                        pointHoverRadius: 15,
-                        pointStyle: 'circle',
-                        showLine: false,
-                        type: 'scatter',
-                        order: 1
+                        label: 'Night',
+                        data: {json.dumps(night_data)},
+                        borderColor: '#3b82f6',
+                        backgroundColor: '#3b82f6',
+                        spanGaps: false
+                    }},
+                    {{
+                        label: 'Stacking',
+                        data: {json.dumps(stacking_data)},
+                        borderColor: '#8b5cf6',
+                        backgroundColor: '#8b5cf6',
+                        spanGaps: false
                     }}
                 ]
             }},
             options: chartOptions
         }});
+            '''
+
+        html += '''
         </script>
         '''
     elif path.startswith(f'/{stage}/gardencam/fullres') or path.startswith('/gardencam/fullres'):
@@ -1532,6 +1647,10 @@ def lambda_handler(event, context):
             timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
             image_url = get_presigned_url(image_key)
 
+            # Fetch stats for this image
+            stats = get_image_stats_by_filename(image_key)
+            stats_display = format_stats_for_display(stats)
+
             html += f'''
             <title>Full Resolution - {timestamp}</title>
             <style>
@@ -1545,7 +1664,7 @@ def lambda_handler(event, context):
             <div class="nav">
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a>
             </div>
-            <h2>{timestamp} UTC</h2>
+            <h2>{timestamp} UTC{stats_display}</h2>
             <img src="{image_url}" alt="Full resolution image">
             '''
         else:
@@ -1570,6 +1689,10 @@ def lambda_handler(event, context):
             timestamp = parse_timestamp_from_key(image_key) or 'Unknown'
             image_url = get_presigned_url(image_key)
 
+            # Fetch stats for this image
+            stats = get_image_stats_by_filename(image_key)
+            stats_display = format_stats_for_display(stats)
+
             html += f'''
             <title>Display Width - {timestamp}</title>
             <style>
@@ -1584,7 +1707,7 @@ def lambda_handler(event, context):
             <div class="nav">
                 <a href="../../contents">Home</a> | <a href="../gardencam">Latest</a> | <a href="gallery">Gallery</a> | <a href="fullres?key={image_key}">Full Res</a>
             </div>
-            <h2>{timestamp} UTC</h2>
+            <h2>{timestamp} UTC{stats_display}</h2>
             <div class="image-container">
                 <a href="fullres?key={image_key}">
                     <img src="{image_url}" alt="Display width image">
@@ -1742,12 +1865,16 @@ def lambda_handler(event, context):
                     thumb_url = get_presigned_url(img['key'])
                     time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
 
+                    # Fetch stats for this image
+                    stats = get_image_stats_by_filename(img['key'])
+                    stats_display = format_stats_for_display(stats)
+
                     html += f'''
                     <div class="thumb-container">
                         <a href="display?key={img['key']}">
                             <img src="{thumb_url}" alt="{img['timestamp']}">
                         </a>
-                        <div class="thumb-time">{time_only}</div>
+                        <div class="thumb-time">{time_only}{stats_display}</div>
                     </div>
                     '''
 
@@ -2651,13 +2778,14 @@ def lambda_handler(event, context):
             for idx, img in enumerate(images):
                 label = labels[idx] if idx < len(labels) else f'Image {idx+1}'
                 resolution_display = f" • {img['resolution']}" if img.get('resolution') else ""
+                stats_display = img.get('stats_display', '')
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
                     <a href="gardencam/display?key={img['key']}">
                         <img src="{img['url']}" alt="{label} capture">
                     </a>
-                    <p class="timestamp">{img['timestamp']}{resolution_display}</p>
+                    <p class="timestamp">{img['timestamp']}{resolution_display}{stats_display}</p>
                 </div>
                 '''
             html += '</div>'
@@ -2703,7 +2831,6 @@ def lambda_handler(event, context):
                 ip_data[ip]['user_agents'][ua] += 1
                 if timestamp:
                     try:
-                        from datetime import datetime
                         ts = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                         ip_data[ip]['timestamps'].append(ts)
                     except:
@@ -2743,7 +2870,6 @@ def lambda_handler(event, context):
 
         # Generate histogram data for last 7 days with 28 buckets (6-hour intervals)
         # Aligned to midnight, 6am, noon, 6pm
-        from datetime import datetime, timedelta
         now = datetime.utcnow()
 
         # Find midnight 7 days ago
