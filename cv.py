@@ -14,9 +14,9 @@ except ImportError:
 
 GARDENCAM_BUCKET = "gardencam-berrylands-eu-west-1"
 GARDENCAM_REGION = "eu-west-1"
-GARDENCAM_SECRET_NAME = "gardencam/password"
+GARDENCAM_PARAMETER_NAME = "/berrylands/gardencam/password"
 GARDENCAM_PASSWORD = None
-TFL_SECRET_NAME = "tfl/api-key"
+TFL_PARAMETER_NAME = "/berrylands/tfl/api-key"
 TFL_API_KEY = None
 DYNAMODB_TABLE = "cv-access-logs"
 
@@ -26,34 +26,45 @@ MEMSPEED_RESULTS_PREFIX = "memspeed/results/"
 MEMSPEED_DOWNLOADS_PREFIX = "memspeed/downloads/"
 
 
-def get_secret(secret_name, key='password'):
-    """Retrieve a secret from AWS Secrets Manager."""
+def get_parameter(parameter_name):
+    """Retrieve a parameter from AWS Systems Manager Parameter Store (FREE!)."""
     if not BOTO3_AVAILABLE:
-        print(f"WARNING: boto3 not available. Cannot retrieve secret: {secret_name}")
+        print(f"WARNING: boto3 not available. Cannot retrieve parameter: {parameter_name}")
         return None
 
     try:
-        client = boto3.client('secretsmanager', region_name=GARDENCAM_REGION)
-        response = client.get_secret_value(SecretId=secret_name)
+        client = boto3.client('ssm', region_name=GARDENCAM_REGION)
+        response = client.get_parameter(
+            Name=parameter_name,
+            WithDecryption=True  # Decrypt SecureString parameters
+        )
 
-        if 'SecretString' in response:
-            secret = json.loads(response['SecretString'])
-            return secret.get(key)
+        value = response['Parameter']['Value']
 
-        return None
+        # Try to parse as JSON (for structured secrets)
+        try:
+            data = json.loads(value)
+            # If it's a dict with 'password' or 'api_key', extract that
+            if isinstance(data, dict):
+                return data.get('password') or data.get('api_key') or value
+            return value
+        except json.JSONDecodeError:
+            # Plain string value
+            return value
+
     except Exception as e:
-        print(f"ERROR: Failed to retrieve secret {secret_name}: {str(e)}")
+        print(f"ERROR: Failed to retrieve parameter {parameter_name}: {str(e)}")
         return None
 
 
-# Initialize secrets from Secrets Manager on cold start
-GARDENCAM_PASSWORD = get_secret(GARDENCAM_SECRET_NAME, 'password')
+# Initialize parameters from Parameter Store on cold start (FREE!)
+GARDENCAM_PASSWORD = get_parameter(GARDENCAM_PARAMETER_NAME)
 if not GARDENCAM_PASSWORD:
-    print(f"WARNING: Could not retrieve password from Secrets Manager ({GARDENCAM_SECRET_NAME}). Gardencam will be inaccessible.")
+    print(f"WARNING: Could not retrieve password from Parameter Store ({GARDENCAM_PARAMETER_NAME}). Gardencam will be inaccessible.")
 
-TFL_API_KEY = get_secret(TFL_SECRET_NAME, 'api_key')
+TFL_API_KEY = get_parameter(TFL_PARAMETER_NAME)
 if TFL_API_KEY:
-    print("TfL API key loaded from Secrets Manager")
+    print("TfL API key loaded from Parameter Store (FREE!)")
 else:
     print("WARNING: No TfL API key found. Using unauthenticated access (rate limited).")
 
