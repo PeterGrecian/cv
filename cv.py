@@ -422,6 +422,52 @@ def should_display_image(stats):
     return True
 
 
+def calculate_time_delta(current_timestamp, previous_timestamp):
+    """Calculate time delta between two timestamps and format as string.
+
+    Returns string like "+2m", "+15m", "+1h 5m", etc.
+    Returns empty string if calculation fails.
+    """
+    if not current_timestamp or not previous_timestamp:
+        return ""
+
+    try:
+        # Parse timestamps - handle both "YYYY-MM-DD HH:MM:SS" and "HH:MM:SS" formats
+        from datetime import datetime
+
+        # If timestamps have dates, parse full format
+        if ' ' in current_timestamp and len(current_timestamp) > 10:
+            current_dt = datetime.strptime(current_timestamp, "%Y-%m-%d %H:%M:%S")
+            previous_dt = datetime.strptime(previous_timestamp, "%Y-%m-%d %H:%M:%S")
+        else:
+            # Time-only format - assume same day
+            current_dt = datetime.strptime(current_timestamp, "%H:%M:%S")
+            previous_dt = datetime.strptime(previous_timestamp, "%H:%M:%S")
+
+        # Calculate delta (previous is later/more recent, current is earlier in the list)
+        # So we want previous - current to get the time gap
+        delta_seconds = abs((previous_dt - current_dt).total_seconds())
+
+        # Format delta
+        minutes = int(delta_seconds / 60)
+        hours = minutes // 60
+        remaining_minutes = minutes % 60
+
+        if hours > 0:
+            if remaining_minutes > 0:
+                return f"+{hours}h {remaining_minutes}m"
+            else:
+                return f"+{hours}h"
+        elif minutes > 0:
+            return f"+{minutes}m"
+        else:
+            return "+<1m"
+
+    except Exception as e:
+        print(f"Error calculating time delta: {e}")
+        return ""
+
+
 def format_stats_for_display(stats):
     """Format brightness and image diff for display with 3 significant figures."""
     if not stats:
@@ -1897,6 +1943,8 @@ def lambda_handler(event, context):
                 html += '<div class="thumbnails">'
 
                 displayed_count = 0
+                displayed_images = []  # Track displayed images for delta calculation
+
                 for img in current_period_images:
                     # Fetch stats for this image
                     stats = get_image_stats_by_filename(img['key'])
@@ -1909,15 +1957,24 @@ def lambda_handler(event, context):
                     time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
                     stats_display = format_stats_for_display(stats)
 
+                    # Calculate time delta from previous displayed image
+                    time_delta = ""
+                    if displayed_images:
+                        previous_img = displayed_images[-1]
+                        time_delta = calculate_time_delta(img['timestamp'], previous_img['timestamp'])
+                        if time_delta:
+                            time_delta = f"{time_delta} "  # Add space after delta
+
                     html += f'''
                     <div class="thumb-container">
                         <a href="display?key={img['key']}">
                             <img src="{thumb_url}" alt="{img['timestamp']}">
                         </a>
-                        <div class="thumb-time">{time_only}{stats_display}</div>
+                        <div class="thumb-time">{time_delta}{time_only}{stats_display}</div>
                     </div>
                     '''
                     displayed_count += 1
+                    displayed_images.append(img)
 
                 html += '</div>'
 
@@ -2820,13 +2877,22 @@ def lambda_handler(event, context):
                 label = labels[idx] if idx < len(labels) else f'Image {idx+1}'
                 resolution_display = f" • {img['resolution']}" if img.get('resolution') else ""
                 stats_display = img.get('stats_display', '')
+
+                # Calculate time delta from previous displayed image (if not first)
+                time_delta = ""
+                if idx > 0:
+                    previous_img = images[idx - 1]
+                    time_delta = calculate_time_delta(img['timestamp'], previous_img['timestamp'])
+                    if time_delta:
+                        time_delta = f"{time_delta} "  # Add space after delta
+
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
                     <a href="gardencam/display?key={img['key']}">
                         <img src="{img['url']}" alt="{label} capture">
                     </a>
-                    <p class="timestamp">{img['timestamp']}{resolution_display}{stats_display}</p>
+                    <p class="timestamp">{time_delta}{img['timestamp']}{resolution_display}{stats_display}</p>
                 </div>
                 '''
             html += '</div>'
