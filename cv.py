@@ -287,8 +287,9 @@ def get_latest_gardencam_images(count=3):
     t0 = time.time()
 
     # Fetch more images than needed since some will be filtered out
-    # Assuming ~50% might be filtered during bright daytime hours
-    all_images = get_all_gardencam_images(max_keys=count * 3)
+    # With aggressive brightness+delta filtering, we may need to go back far
+    # During bright daytime with minimal changes, ~80-90% might be filtered
+    all_images = get_all_gardencam_images(max_keys=count * 30)
     print(f"[TIMING] get_all_gardencam_images took {(time.time()-t0)*1000:.0f}ms, returned {len(all_images)} images")
 
     t1 = time.time()
