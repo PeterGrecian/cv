@@ -244,6 +244,78 @@ def get_images_for_date(date_str):
         return []
 
 
+def generate_week_list():
+    """Generate list of weeks from GARDENCAM_EARLIEST_IMAGE to today.
+
+    Returns list of week strings in format "2026-W07 (Feb 09-Feb 15)" in reverse chronological order.
+    Uses NO S3 queries - purely deterministic date arithmetic.
+    """
+    from datetime import datetime, timedelta
+
+    # Parse earliest image date
+    start_date = datetime.strptime(GARDENCAM_EARLIEST_IMAGE, '%Y-%m-%d')
+    end_date = datetime.now()
+
+    weeks = []
+    current = end_date
+
+    # Walk backwards from today to start, week by week
+    while current >= start_date:
+        iso_year, iso_week, iso_weekday = current.isocalendar()
+
+        # Calculate Monday of this week
+        days_since_monday = iso_weekday - 1
+        monday = current - timedelta(days=days_since_monday)
+        sunday = monday + timedelta(days=6)
+
+        # Format: "2026-W07 (Feb 09-Feb 15)"
+        week_str = f"{iso_year}-W{iso_week:02d} ({monday.strftime('%b %d')}-{sunday.strftime('%b %d')})"
+
+        if week_str not in weeks:  # Avoid duplicates when scanning
+            weeks.append(week_str)
+
+        # Move to previous week
+        current = monday - timedelta(days=1)
+
+    return weeks
+
+
+def get_days_in_week(week_str):
+    """Get list of days in a week without loading any images.
+
+    Args:
+        week_str: Week string like "2026-W07 (Feb 09-Feb 15)"
+
+    Returns list of day strings in format "2026-02-15 (Sunday)" - NO S3 queries.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        # Parse week string: "2026-W07 (Feb 09-Feb 15)" → extract dates
+        parts = week_str.split(' ')
+        year_week = parts[0]  # "2026-W07"
+        year = int(year_week.split('-')[0])
+        week_num = int(year_week.split('-W')[1])
+
+        # Find Monday of this ISO week
+        jan4 = datetime(year, 1, 4)
+        week1_monday = jan4 - timedelta(days=jan4.weekday())
+        target_monday = week1_monday + timedelta(weeks=week_num - 1)
+
+        # Generate all 7 days (Monday to Sunday)
+        days = []
+        for day_offset in range(7):
+            date = target_monday + timedelta(days=day_offset)
+            day_str = date.strftime('%Y-%m-%d (%A)')  # "2026-02-15 (Sunday)"
+            days.append(day_str)
+
+        return days
+
+    except Exception as e:
+        print(f"Error generating days for week {week_str}: {e}")
+        return []
+
+
 def get_all_gardencam_images(max_keys=None):
     """Get all gardencam images from S3.
 
@@ -2413,16 +2485,17 @@ def lambda_handler(event, context):
                 }
             }
 
-        all_images = get_all_gardencam_images()
-        weeks = group_images_by_weeks(all_images)
-
         # Get query parameters
         query_params = event.get('queryStringParameters', {}) or {}
         week_param = query_params.get('week', '')
         day_param = query_params.get('day', '')
 
         # Three-level navigation: Weeks → Days → Images
+        # OPTIMIZED: Only load S3 data when needed
         if not week_param:
+            # Week index - generate deterministically, NO S3 queries
+            weeks = generate_week_list()
+
             html += '''
             <title>Garden Camera Gallery - Weekly Index</title>
             <style>
@@ -2446,8 +2519,8 @@ def lambda_handler(event, context):
             <div class="week-list">
             '''
 
-            for week_name, week_images in weeks:
-                # Just show the week - no counting needed
+            for week_name in weeks:
+                # Just show the week - no counting, no S3 queries
                 html += f'''
                 <a href="gallery?week={week_name}" class="week-link">
                     {week_name}
@@ -2457,13 +2530,8 @@ def lambda_handler(event, context):
             html += '</div>'
 
         elif week_param and not day_param:
-            # Show days in the selected week
-            # Find the requested week
-            current_week_images = []
-            for week_name, week_images in weeks:
-                if week_name == week_param:
-                    current_week_images = week_images
-                    break
+            # Show days in the selected week - OPTIMIZED: only load images for this week
+            current_week_images = get_images_for_week(week_param)
 
             if not current_week_images:
                 html += '<h1>Week not found</h1><p><a href="gallery">Back to Gallery Index</a></p>'
@@ -2513,14 +2581,9 @@ def lambda_handler(event, context):
             if not current_day_images:
                 html += f'<h1>No images found for {day_param}</h1><p><a href="gallery?week={week_param}">Back to {week_param}</a></p>'
             else:
-                # Get all days in this week for prev/next navigation
-                # We need to load week data for navigation only
-                current_week_images = []
-                for week_name, week_images in weeks:
-                    if week_name == week_param:
-                        current_week_images = week_images
-                        break
-
+                # Get days in this week for prev/next navigation
+                # Only load week data if needed for navigation
+                current_week_images = get_images_for_week(week_param)
                 days = group_images_by_days(current_week_images) if current_week_images else []
                 day_index = None
                 for idx, (day_name, _) in enumerate(days):
@@ -2530,18 +2593,19 @@ def lambda_handler(event, context):
 
                 if day_index is None:
                     day_index = 0  # Fallback
-                    # Build navigation links
-                    prev_link = ''
-                    next_link = ''
-                    if day_index > 0:
-                        prev_day = days[day_index - 1][0]
-                        prev_link = f'<a href="gallery?week={week_param}&day={prev_day}">← Previous Day</a>'
-                    if day_index < len(days) - 1:
-                        next_day = days[day_index + 1][0]
-                        next_link = f'<a href="gallery?week={week_param}&day={next_day}">Next Day →</a>'
 
-                    html += f'''
-                    <title>{day_param} - Gallery</title>
+                # Build navigation links
+                prev_link = ''
+                next_link = ''
+                if day_index > 0:
+                    prev_day = days[day_index - 1][0]
+                    prev_link = f'<a href="gallery?week={week_param}&day={prev_day}">← Previous Day</a>'
+                if day_index < len(days) - 1:
+                    next_day = days[day_index + 1][0]
+                    next_link = f'<a href="gallery?week={week_param}&day={next_day}">Next Day →</a>'
+
+                html += f'''
+                <title>{day_param} - Gallery</title>
                 <style>
                     body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
                     .nav {{ text-align: center; margin-bottom: 1.5rem; }}
@@ -2569,45 +2633,45 @@ def lambda_handler(event, context):
                         {next_link}
                     </div>
                     <h1>{day_param}</h1>
+                '''
+
+                html += '<div class="thumbnails">'
+
+                displayed_count = 0
+                displayed_images = []  # Track displayed images for delta calculation
+
+                for img in current_day_images:
+                    # Fetch stats for this image
+                    stats = get_image_stats_by_filename(img['key'])
+
+                    # Skip images that don't meet display criteria
+                    if not should_display_image(stats):
+                        continue
+
+                    thumb_url = get_presigned_url(img['key'])
+                    time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
+                    stats_display = format_stats_for_display(stats)
+
+                    # Calculate time delta from previous displayed image
+                    time_delta = ""
+                    if displayed_images:
+                        previous_img = displayed_images[-1]
+                        time_delta = calculate_time_delta(img['timestamp'], previous_img['timestamp'])
+                        if time_delta:
+                            time_delta = f"{time_delta} "  # Add space after delta
+
+                    html += f'''
+                    <div class="thumb-container">
+                        <a href="display?key={img['key']}">
+                            <img src="{thumb_url}" alt="{img['timestamp']}">
+                        </a>
+                        <div class="thumb-time">{time_delta}{time_only}{stats_display}</div>
+                    </div>
                     '''
+                    displayed_count += 1
+                    displayed_images.append(img)
 
-                    html += '<div class="thumbnails">'
-
-                    displayed_count = 0
-                    displayed_images = []  # Track displayed images for delta calculation
-
-                    for img in current_day_images:
-                        # Fetch stats for this image
-                        stats = get_image_stats_by_filename(img['key'])
-
-                        # Skip images that don't meet display criteria
-                        if not should_display_image(stats):
-                            continue
-
-                        thumb_url = get_presigned_url(img['key'])
-                        time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
-                        stats_display = format_stats_for_display(stats)
-
-                        # Calculate time delta from previous displayed image
-                        time_delta = ""
-                        if displayed_images:
-                            previous_img = displayed_images[-1]
-                            time_delta = calculate_time_delta(img['timestamp'], previous_img['timestamp'])
-                            if time_delta:
-                                time_delta = f"{time_delta} "  # Add space after delta
-
-                        html += f'''
-                        <div class="thumb-container">
-                            <a href="display?key={img['key']}">
-                                <img src="{thumb_url}" alt="{img['timestamp']}">
-                            </a>
-                            <div class="thumb-time">{time_delta}{time_only}{stats_display}</div>
-                        </div>
-                        '''
-                        displayed_count += 1
-                        displayed_images.append(img)
-
-                    html += '</div>'
+                html += '</div>'
 
     elif path.startswith(f'/{stage}/gardencam/s3-stats') or path.startswith('/gardencam/s3-stats'):
         # S3 storage statistics page - reads from cached JSON
