@@ -16,6 +16,7 @@ GARDENCAM_BUCKET = "gardencam-berrylands-eu-west-1"
 GARDENCAM_REGION = "eu-west-1"
 GARDENCAM_PARAMETER_NAME = "/berrylands/gardencam/password"
 GARDENCAM_PASSWORD = None
+GARDENCAM_EARLIEST_IMAGE = "2026-01-19"  # First image: garden_20260119_185439.jpg
 TFL_PARAMETER_NAME = "/berrylands/tfl/api-key"
 TFL_API_KEY = None
 DYNAMODB_TABLE = "cv-access-logs"
@@ -186,6 +187,63 @@ def get_presigned_url(key, expires_in=3600):
     )
 
 
+def get_images_for_date(date_str):
+    """Get gardencam images for a specific date (YYYY-MM-DD).
+
+    Uses S3 prefix filtering for efficiency - only fetches ~240 images instead of all 2,876.
+    """
+    if not BOTO3_AVAILABLE:
+        return []
+
+    # Convert date to S3 prefix: 2026-02-15 → garden_20260215
+    date_prefix = f"garden_{date_str.replace('-', '')}"
+
+    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
+
+    try:
+        response = s3.list_objects_v2(
+            Bucket=GARDENCAM_BUCKET,
+            Prefix=date_prefix,
+            MaxKeys=1000  # One day shouldn't have more than 240 images
+        )
+
+        if "Contents" not in response:
+            return []
+
+        # Convert to standard format with timestamps
+        images = []
+        for obj in response["Contents"]:
+            key = obj["Key"]
+            # Skip thumbnails
+            if key.startswith('thumb_'):
+                continue
+
+            # Extract timestamp from filename: garden_20260215_123456.jpg
+            try:
+                parts = key.replace('.jpg', '').split('_')
+                date_part = parts[1]  # 20260215
+                time_part = parts[2]  # 123456
+
+                # Format: YYYY-MM-DD HH:MM:SS
+                timestamp = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]} {time_part[:2]}:{time_part[2:4]}:{time_part[4:6]}"
+
+                images.append({
+                    'key': key,
+                    'timestamp': timestamp,
+                    'LastModified': obj['LastModified']
+                })
+            except:
+                pass
+
+        # Sort by timestamp descending
+        images.sort(key=lambda x: x['timestamp'], reverse=True)
+        return images
+
+    except Exception as e:
+        print(f"Error fetching images for date {date_str}: {e}")
+        return []
+
+
 def get_all_gardencam_images(max_keys=None):
     """Get all gardencam images from S3.
 
@@ -353,6 +411,65 @@ def get_latest_gardencam_images(count=3):
     print(f"[TIMING] Total get_latest_gardencam_images: {(time.time()-t0)*1000:.0f}ms")
 
     return images
+
+
+def group_images_by_weeks(images):
+    """Group images into weekly periods (Monday-Sunday)."""
+    from collections import defaultdict
+    from datetime import datetime
+
+    weeks = defaultdict(list)
+
+    for img in images:
+        try:
+            ts = img['timestamp']
+            # Parse timestamp: YYYY-MM-DD HH:MM:SS
+            dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+
+            # Get ISO week (returns (year, week_number, weekday))
+            iso_year, iso_week, iso_weekday = dt.isocalendar()
+
+            # Calculate Monday of this week
+            # ISO weekday: 1=Monday, 7=Sunday
+            days_since_monday = iso_weekday - 1
+            monday = dt - timedelta(days=days_since_monday)
+
+            # Week key format: "2026-W03 (Jan 13-19)"
+            sunday = monday + timedelta(days=6)
+            week_key = f"{iso_year}-W{iso_week:02d} ({monday.strftime('%b %d')}-{sunday.strftime('%b %d')})"
+
+            weeks[week_key].append(img)
+        except Exception as e:
+            weeks['Unknown'].append(img)
+
+    # Sort weeks in reverse chronological order
+    sorted_weeks = sorted(weeks.items(), reverse=True)
+    return sorted_weeks
+
+
+def group_images_by_days(images):
+    """Group images by individual days."""
+    from collections import defaultdict
+    from datetime import datetime
+
+    days = defaultdict(list)
+
+    for img in images:
+        try:
+            ts = img['timestamp']
+            # Parse timestamp: YYYY-MM-DD HH:MM:SS
+            dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+
+            # Day key format: "2026-02-15 (Saturday)"
+            day_key = dt.strftime('%Y-%m-%d (%A)')
+
+            days[day_key].append(img)
+        except:
+            days['Unknown'].append(img)
+
+    # Sort days in reverse chronological order
+    sorted_days = sorted(days.items(), reverse=True)
+    return sorted_days
 
 
 def group_images_by_4hour_periods(images):
@@ -715,6 +832,481 @@ def get_lambda_execution_stats(limit=1000):
     except Exception as e:
         print(f"Error fetching Lambda execution stats from DynamoDB: {e}")
         return []
+
+
+# ============================================================================
+# Pi Fleet Status Dashboard
+# ============================================================================
+
+def get_pi_fleet_status():
+    """Get Pi fleet status from DynamoDB."""
+    if not BOTO3_AVAILABLE:
+        return []
+
+    try:
+        dynamodb = boto3.resource('dynamodb', region_name=GARDENCAM_REGION)
+        table = dynamodb.Table('pi-fleet-status')
+
+        response = table.scan()
+        items = response.get('Items', [])
+
+        # Handle pagination
+        while 'LastEvaluatedKey' in response:
+            response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+            items.extend(response.get('Items', []))
+
+        # Sort by hostname
+        items.sort(key=lambda x: x.get('hostname', ''))
+
+        return items
+    except Exception as e:
+        print(f"Error fetching pi-fleet status from DynamoDB: {e}")
+        return []
+
+
+def format_uptime(seconds):
+    """Format uptime in a human-readable way."""
+    if not seconds:
+        return "Unknown"
+
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0 or not parts:
+        parts.append(f"{minutes}m")
+
+    return " ".join(parts)
+
+
+def is_pi_online(last_seen):
+    """Check if Pi is online based on last_seen timestamp."""
+    if not last_seen:
+        return False
+
+    try:
+        from dateutil import parser
+        last_seen_dt = parser.parse(last_seen)
+    except:
+        try:
+            last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
+        except:
+            return False
+
+    # Consider online if seen in last 2 minutes
+    now = datetime.now(timezone.utc)
+    delta = (now - last_seen_dt).total_seconds()
+    return delta < 120
+
+
+def render_pi_fleet_page(pis):
+    """Render the Pi Fleet dashboard HTML."""
+
+    # Count online/offline
+    online_count = sum(1 for pi in pis if is_pi_online(pi.get('last_seen')))
+    offline_count = len(pis) - online_count
+
+    html = '''
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi Fleet Status</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 2rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .home-link {
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .home-link a {
+            color: white;
+            text-decoration: none;
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+
+        .home-link a:hover {
+            opacity: 1;
+            text-decoration: underline;
+        }
+
+        .summary {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .summary-item {
+            text-align: center;
+        }
+
+        .summary-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .summary-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .online { color: #10b981; }
+        .offline { color: #ef4444; }
+        .total { color: #667eea; }
+
+        .pi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .pi-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            transition: transform 0.2s;
+        }
+
+        .pi-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 12px rgba(0,0,0,0.3);
+        }
+
+        .pi-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .pi-hostname {
+            font-size: 1.3rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .pi-status {
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+        }
+
+        .status-online {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-offline {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .pi-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .info-item {
+            font-size: 0.9rem;
+        }
+
+        .info-label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .info-value {
+            color: #333;
+            font-weight: 600;
+        }
+
+        .metrics {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .metric {
+            flex: 1;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: #666;
+            text-transform: uppercase;
+        }
+
+        .boot-progress {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .error-box {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: #fee2e2;
+            border-left: 4px solid #ef4444;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: #991b1b;
+        }
+
+        .empty-state {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 3rem;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+
+        .empty-state h2 {
+            color: #666;
+            margin-bottom: 1rem;
+        }
+
+        .auto-refresh {
+            text-align: center;
+            color: white;
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            .pi-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .pi-info {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+    </head>
+    <body>
+    <div class="container">
+        <div class="home-link">
+            <a href="contents">← Home</a>
+        </div>
+
+        <h1>Pi Fleet Status</h1>
+    '''
+
+    html += f'''
+        <div class="summary">
+            <div class="summary-item">
+                <div class="summary-value online">{online_count}</div>
+                <div class="summary-label">Online</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value offline">{offline_count}</div>
+                <div class="summary-label">Offline</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-value total">{len(pis)}</div>
+                <div class="summary-label">Total Devices</div>
+            </div>
+        </div>
+    '''
+
+    if not pis:
+        html += '''
+        <div class="empty-state">
+            <h2>No Devices Found</h2>
+            <p>No Raspberry Pis have reported their status yet.</p>
+            <p>Make sure the pi-fleet-reporter service is running on your devices.</p>
+        </div>
+        '''
+    else:
+        html += '<div class="pi-grid">'
+
+        for pi in pis:
+            hostname = pi.get('hostname', 'unknown')
+            online = is_pi_online(pi.get('last_seen'))
+            status_class = 'status-online' if online else 'status-offline'
+            status_text = 'Online' if online else 'Offline'
+
+            serial = pi.get('serial', 'unknown')
+            local_ip = pi.get('local_ip', 'unknown')
+            app_name = pi.get('app_name', 'unknown')
+            uptime = format_uptime(pi.get('uptime_seconds', 0))
+
+            cpu = pi.get('cpu_percent', 0)
+            mem = pi.get('memory_percent', 0)
+            disk = pi.get('disk_percent', 0)
+
+            tunnel_active = pi.get('tunnel_active', False)
+            tunnel_port = pi.get('tunnel_port', 0)
+            bastion_host = pi.get('bastion_host', 'unknown')
+
+            last_seen = pi.get('last_seen', 'Never')
+            try:
+                from dateutil import parser
+                last_seen_dt = parser.parse(last_seen)
+                last_seen_str = last_seen_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+            except:
+                try:
+                    last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
+                    last_seen_str = last_seen_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
+                except:
+                    last_seen_str = last_seen
+
+            html += f'''
+            <div class="pi-card">
+                <div class="pi-header">
+                    <div class="pi-hostname">{hostname}</div>
+                    <div class="pi-status {status_class}">{status_text}</div>
+                </div>
+
+                <div class="pi-info">
+                    <div class="info-item">
+                        <div class="info-label">Serial</div>
+                        <div class="info-value">{serial}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Local IP</div>
+                        <div class="info-value">{local_ip}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">App</div>
+                        <div class="info-value">{app_name}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Uptime</div>
+                        <div class="info-value">{uptime}</div>
+                    </div>
+            '''
+
+            if tunnel_active:
+                html += f'''
+                    <div class="info-item">
+                        <div class="info-label">SSH Tunnel</div>
+                        <div class="info-value">Port {tunnel_port}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Bastion</div>
+                        <div class="info-value">{bastion_host}</div>
+                    </div>
+                '''
+
+            html += f'''
+                    <div class="info-item" style="grid-column: 1 / -1;">
+                        <div class="info-label">Last Seen</div>
+                        <div class="info-value">{last_seen_str}</div>
+                    </div>
+                </div>
+            '''
+
+            if online:
+                html += f'''
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="metric-value">{cpu}%</div>
+                        <div class="metric-label">CPU</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">{mem}%</div>
+                        <div class="metric-label">Memory</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-value">{disk}%</div>
+                        <div class="metric-label">Disk</div>
+                    </div>
+                </div>
+                '''
+
+            # Show boot progress if in provisioning
+            boot_progress = pi.get('boot_progress') or pi.get('stage')
+            if boot_progress and boot_progress.startswith('boot'):
+                message = pi.get('message', 'Provisioning in progress...')
+                html += f'''
+                <div class="boot-progress">
+                    <strong>🔄 Boot Progress:</strong> {boot_progress}<br>
+                    {message}
+                </div>
+                '''
+
+            # Show error if present
+            error = pi.get('error')
+            if error:
+                html += f'''
+                <div class="error-box">
+                    <strong>⚠️ Error:</strong><br>
+                    {error[:200]}{'...' if len(error) > 200 else ''}
+                </div>
+                '''
+
+            html += '</div>'
+
+        html += '</div>'
+
+    html += '''
+        <div class="auto-refresh">
+            Page auto-refreshes every 30 seconds
+        </div>
+    </div>
+
+    <script>
+        // Auto-refresh every 30 seconds
+        setTimeout(() => location.reload(), 30000);
+    </script>
+    </body>
+    </html>
+    '''
+
+    return html
 
 
 # ============================================================================
@@ -1810,7 +2402,7 @@ def lambda_handler(event, context):
         else:
             html += '<h1>Error: No image specified</h1>'
     elif path.startswith(f'/{stage}/gardencam/gallery') or path.startswith('/gardencam/gallery'):
-        # Gallery page with thumbnails organized by 4-hour periods
+        # Gallery page with thumbnails organized by weeks
         if not check_basic_auth(event, GARDENCAM_PASSWORD):
             return {
                 'statusCode': 401,
@@ -1822,26 +2414,27 @@ def lambda_handler(event, context):
             }
 
         all_images = get_all_gardencam_images()
-        periods = group_images_by_4hour_periods(all_images)
+        weeks = group_images_by_weeks(all_images)
 
         # Get query parameters
         query_params = event.get('queryStringParameters', {}) or {}
-        period_param = query_params.get('period', '')
+        week_param = query_params.get('week', '')
+        day_param = query_params.get('day', '')
 
-        # If no period specified, show index of all periods
-        if not period_param:
+        # Three-level navigation: Weeks → Days → Images
+        if not week_param:
             html += '''
-            <title>Garden Camera Gallery Index</title>
+            <title>Garden Camera Gallery - Weekly Index</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }
                 .nav { text-align: center; margin-bottom: 2rem; }
                 .nav a { color: #4a9eff; text-decoration: none; margin: 0 1rem; }
                 .nav a:hover { text-decoration: underline; }
                 h1 { text-align: center; margin-bottom: 2rem; }
-                .period-list { max-width: 800px; margin: 0 auto; }
-                .period-link { display: block; padding: 1rem 1.5rem; margin-bottom: 0.75rem; background: #2a2a2a; border-radius: 8px; text-decoration: none; color: #4a9eff; font-size: 1.1rem; transition: background 0.3s; }
-                .period-link:hover { background: #3a3a3a; }
-                .period-count { float: right; color: #888; font-size: 0.9rem; }
+                .week-list { max-width: 800px; margin: 0 auto; }
+                .week-link { display: block; padding: 1rem 1.5rem; margin-bottom: 0.75rem; background: #2a2a2a; border-radius: 8px; text-decoration: none; color: #4a9eff; font-size: 1.1rem; transition: background 0.3s; }
+                .week-link:hover { background: #3a3a3a; }
+                .week-count { float: right; color: #888; font-size: 0.9rem; }
             </style>
             <div class="nav">
                 <a href="../../contents">Home</a>
@@ -1849,57 +2442,106 @@ def lambda_handler(event, context):
                 <a href="videos">Videos</a>
                 <a href="stats">Statistics</a>
             </div>
-            <h1>Garden Camera Gallery Index</h1>
-            <div class="period-list">
+            <h1>Garden Camera Gallery - By Week</h1>
+            <div class="week-list">
             '''
 
-            for period_name, period_images in periods:
-                # Count only displayable images
-                displayable_count = 0
-                for img in period_images:
-                    stats = get_image_stats_by_filename(img['key'])
-                    if should_display_image(stats):
-                        displayable_count += 1
-
-                # Skip periods with no displayable images
-                if displayable_count == 0:
-                    continue
-
+            for week_name, week_images in weeks:
+                # Just show the week - no counting needed
                 html += f'''
-                <a href="gallery?period={period_name}" class="period-link">
-                    {period_name} UTC
-                    <span class="period-count">{displayable_count} image{"s" if displayable_count != 1 else ""}</span>
+                <a href="gallery?week={week_name}" class="week-link">
+                    {week_name}
                 </a>
                 '''
 
             html += '</div>'
 
-        else:
-            # Show specific period
-            # Find the requested period
-            period_index = None
-            current_period_images = []
-            for idx, (period_name, period_images) in enumerate(periods):
-                if period_name == period_param:
-                    period_index = idx
-                    current_period_images = period_images
+        elif week_param and not day_param:
+            # Show days in the selected week
+            # Find the requested week
+            current_week_images = []
+            for week_name, week_images in weeks:
+                if week_name == week_param:
+                    current_week_images = week_images
                     break
 
-            if period_index is None:
-                html += '<h1>Period not found</h1><p><a href="gallery">Back to Gallery Index</a></p>'
+            if not current_week_images:
+                html += '<h1>Week not found</h1><p><a href="gallery">Back to Gallery Index</a></p>'
             else:
-                # Build navigation links
-                prev_link = ''
-                next_link = ''
-                if period_index > 0:
-                    prev_period = periods[period_index - 1][0]
-                    prev_link = f'<a href="gallery?period={prev_period}">← Previous</a>'
-                if period_index < len(periods) - 1:
-                    next_period = periods[period_index + 1][0]
-                    next_link = f'<a href="gallery?period={next_period}">Next →</a>'
+                # Group week's images by day
+                days = group_images_by_days(current_week_images)
 
                 html += f'''
-                <title>{period_param} - Gallery</title>
+                <title>{week_param} - Days</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
+                    .nav {{ text-align: center; margin-bottom: 2rem; }}
+                    .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
+                    .nav a:hover {{ text-decoration: underline; }}
+                    h1 {{ text-align: center; margin-bottom: 2rem; }}
+                    .day-list {{ max-width: 800px; margin: 0 auto; }}
+                    .day-link {{ display: block; padding: 1rem 1.5rem; margin-bottom: 0.75rem; background: #2a2a2a; border-radius: 8px; text-decoration: none; color: #4a9eff; font-size: 1.1rem; transition: background 0.3s; }}
+                    .day-link:hover {{ background: #3a3a3a; }}
+                </style>
+                <div class="nav">
+                    <a href="../../contents">Home</a>
+                    <a href="gallery">All Weeks</a>
+                    <a href="../gardencam">Latest</a>
+                </div>
+                <h1>{week_param}</h1>
+                <div class="day-list">
+                '''
+
+                for day_name, day_images in days:
+                    html += f'''
+                    <a href="gallery?week={week_param}&day={day_name}" class="day-link">
+                        {day_name}
+                    </a>
+                    '''
+
+                html += '</div>'
+
+        else:
+            # Show images for a specific day - OPTIMIZED: only fetch images for this day
+            # Extract date from day_param: "2026-02-15 (Saturday)" → "2026-02-15"
+            try:
+                date_only = day_param.split(' ')[0]  # Get YYYY-MM-DD part
+                current_day_images = get_images_for_date(date_only)
+            except:
+                current_day_images = []
+
+            if not current_day_images:
+                html += f'<h1>No images found for {day_param}</h1><p><a href="gallery?week={week_param}">Back to {week_param}</a></p>'
+            else:
+                # Get all days in this week for prev/next navigation
+                # We need to load week data for navigation only
+                current_week_images = []
+                for week_name, week_images in weeks:
+                    if week_name == week_param:
+                        current_week_images = week_images
+                        break
+
+                days = group_images_by_days(current_week_images) if current_week_images else []
+                day_index = None
+                for idx, (day_name, _) in enumerate(days):
+                    if day_name == day_param:
+                        day_index = idx
+                        break
+
+                if day_index is None:
+                    day_index = 0  # Fallback
+                    # Build navigation links
+                    prev_link = ''
+                    next_link = ''
+                    if day_index > 0:
+                        prev_day = days[day_index - 1][0]
+                        prev_link = f'<a href="gallery?week={week_param}&day={prev_day}">← Previous Day</a>'
+                    if day_index < len(days) - 1:
+                        next_day = days[day_index + 1][0]
+                        next_link = f'<a href="gallery?week={week_param}&day={next_day}">Next Day →</a>'
+
+                    html += f'''
+                    <title>{day_param} - Gallery</title>
                 <style>
                     body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
                     .nav {{ text-align: center; margin-bottom: 1.5rem; }}
@@ -1918,87 +2560,54 @@ def lambda_handler(event, context):
                         .thumb-container img {{ height: 120px; }}
                     }}
                 </style>
-                <div class="nav">
-                    <a href="../../contents">Home</a>
-                    {prev_link}
-                    <a href="gallery">Index</a>
-                    <a href="../gardencam">Latest</a>
-                    {next_link}
-                </div>
-                <h1>{period_param} UTC</h1>
-                '''
-
-                # Check for averaged image for this period
-                try:
-                    date_part = period_param.split()[0].replace('-', '')
-                    time_range = period_param.split()[1]
-                    start_hour = int(time_range.split(':')[0])
-                    # Period is "04:00-07:59", so end hour should be 7 (last hour in range)
-                    end_hour = int(time_range.split('-')[1].split(':')[0])
-
-                    # Check if averaged image exists
-                    averaged_key = f"averaged_medium_{date_part}_{start_hour:02d}-{end_hour:02d}.jpg"
-                    averaged_full_key = f"averaged_{date_part}_{start_hour:02d}-{end_hour:02d}.jpg"
-
-                    s3 = boto3.client("s3", region_name=GARDENCAM_REGION)
-                    try:
-                        s3.head_object(Bucket=GARDENCAM_BUCKET, Key=averaged_key)
-                        has_averaged = True
-                    except:
-                        has_averaged = False
-                except:
-                    has_averaged = False
-
-                if has_averaged:
-                    # Show averaged image at the top
-                    averaged_url = get_presigned_url(averaged_key)
-                    averaged_full_url = get_presigned_url(averaged_full_key)
-                    html += f'''
-                    <div style="text-align: center; margin-bottom: 2rem; padding: 1rem; background: #2a2a2a; border-radius: 8px;">
-                        <div style="color: #4a9eff; margin-bottom: 0.5rem; font-size: 1.1rem;">⭐ Averaged from {len(current_period_images)} images</div>
-                        <a href="display?key={averaged_full_key}" style="display: inline-block; max-width: 800px;">
-                            <img src="{averaged_url}" alt="Averaged {period_param}" style="width: 100%; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
-                        </a>
+                    <div class="nav">
+                        <a href="../../contents">Home</a>
+                        {prev_link}
+                        <a href="gallery?week={week_param}">Week Index</a>
+                        <a href="gallery">All Weeks</a>
+                        <a href="../gardencam">Latest</a>
+                        {next_link}
                     </div>
+                    <h1>{day_param}</h1>
                     '''
 
-                html += '<div class="thumbnails">'
+                    html += '<div class="thumbnails">'
 
-                displayed_count = 0
-                displayed_images = []  # Track displayed images for delta calculation
+                    displayed_count = 0
+                    displayed_images = []  # Track displayed images for delta calculation
 
-                for img in current_period_images:
-                    # Fetch stats for this image
-                    stats = get_image_stats_by_filename(img['key'])
+                    for img in current_day_images:
+                        # Fetch stats for this image
+                        stats = get_image_stats_by_filename(img['key'])
 
-                    # Skip images that don't meet display criteria
-                    if not should_display_image(stats):
-                        continue
+                        # Skip images that don't meet display criteria
+                        if not should_display_image(stats):
+                            continue
 
-                    thumb_url = get_presigned_url(img['key'])
-                    time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
-                    stats_display = format_stats_for_display(stats)
+                        thumb_url = get_presigned_url(img['key'])
+                        time_only = img['timestamp'].split()[1] if ' ' in img['timestamp'] else img['timestamp']
+                        stats_display = format_stats_for_display(stats)
 
-                    # Calculate time delta from previous displayed image
-                    time_delta = ""
-                    if displayed_images:
-                        previous_img = displayed_images[-1]
-                        time_delta = calculate_time_delta(img['timestamp'], previous_img['timestamp'])
-                        if time_delta:
-                            time_delta = f"{time_delta} "  # Add space after delta
+                        # Calculate time delta from previous displayed image
+                        time_delta = ""
+                        if displayed_images:
+                            previous_img = displayed_images[-1]
+                            time_delta = calculate_time_delta(img['timestamp'], previous_img['timestamp'])
+                            if time_delta:
+                                time_delta = f"{time_delta} "  # Add space after delta
 
-                    html += f'''
-                    <div class="thumb-container">
-                        <a href="display?key={img['key']}">
-                            <img src="{thumb_url}" alt="{img['timestamp']}">
-                        </a>
-                        <div class="thumb-time">{time_delta}{time_only}{stats_display}</div>
-                    </div>
-                    '''
-                    displayed_count += 1
-                    displayed_images.append(img)
+                        html += f'''
+                        <div class="thumb-container">
+                            <a href="display?key={img['key']}">
+                                <img src="{thumb_url}" alt="{img['timestamp']}">
+                            </a>
+                            <div class="thumb-time">{time_delta}{time_only}{stats_display}</div>
+                        </div>
+                        '''
+                        displayed_count += 1
+                        displayed_images.append(img)
 
-                html += '</div>'
+                    html += '</div>'
 
     elif path.startswith(f'/{stage}/gardencam/s3-stats') or path.startswith('/gardencam/s3-stats'):
         # S3 storage statistics page - reads from cached JSON
@@ -3570,6 +4179,11 @@ def lambda_handler(event, context):
         results = get_memspeed_results()
         downloads = get_memspeed_downloads()
         html += render_memspeed_page(results, downloads)
+
+    elif path == f'/{stage}/pi-fleet' or path == '/pi-fleet':
+        # Pi Fleet Status Dashboard
+        pis = get_pi_fleet_status()
+        html += render_pi_fleet_page(pis)
 
     elif path == f'/{stage}/t3' or path == '/t3':
         # Terse Transport Times - K2 bus arrivals
