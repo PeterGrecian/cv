@@ -2659,18 +2659,28 @@ def lambda_handler(event, context):
                 for obj in response['Contents']:
                     key = obj['Key']
                     if key.endswith('.mp4'):
-                        # Extract video ID from filename: videos/timelapse_YYYYMMDD-YYYYMMDD.mp4
+                        # Extract video ID from filename: videos/timelapse_YYYYMMDD-YYYYMMDD.mp4 or videos/timelapse_YYYYMMDD.mp4
                         video_id = key.replace('videos/', '').replace('.mp4', '')
 
                         # Parse date range from filename
                         try:
                             date_part = video_id.replace('timelapse_', '')
-                            start_date, end_date = date_part.split('-')
+                            if '-' in date_part:
+                                # Weekly format: YYYYMMDD-YYYYMMDD
+                                start_date, end_date = date_part.split('-')
+                                video_type = 'weekly'
+                            else:
+                                # Daily format: YYYYMMDD
+                                start_date = date_part
+                                end_date = date_part
+                                video_type = 'daily'
+
                             start_formatted = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}"
                             end_formatted = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}"
                         except:
                             start_formatted = "Unknown"
                             end_formatted = "Unknown"
+                            video_type = 'unknown'
 
                         # Get metadata from DynamoDB if available
                         try:
@@ -2709,11 +2719,14 @@ def lambda_handler(event, context):
                             'start_date': start_formatted,
                             'end_date': end_formatted,
                             'frame_count': frame_count,
-                            'duration': duration
+                            'duration': duration,
+                            'type': video_type
                         })
 
-            # Sort by video ID (date) descending
+            # Sort by video ID (date) descending and separate by type
             videos.sort(key=lambda v: v['id'], reverse=True)
+            weekly_videos = [v for v in videos if v['type'] == 'weekly']
+            daily_videos = [v for v in videos if v['type'] == 'daily']
 
         except Exception as e:
             print(f"Error listing videos: {e}")
@@ -2755,33 +2768,77 @@ def lambda_handler(event, context):
         <h1>Timelapse Videos</h1>
         '''
 
-        if videos:
-            html += '<div class="video-grid">'
-            for video in videos:
+        if weekly_videos or daily_videos:
+            # Weekly videos section
+            if weekly_videos:
                 html += f'''
-                <a href="video?id={video['id']}" class="video-card">
-                    <div class="video-thumbnail">
-                        <div class="play-icon"></div>
-                    </div>
-                    <div class="video-metadata">
-                        <h3>Week of {video['start_date']} to {video['end_date']}</h3>
-                        <div class="video-stats">
-                            <div class="stat">
-                                <span class="stat-value">{video['frame_count']}</span>
-                                <span class="stat-label">frames</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value">{video['duration']}s</span>
-                                <span class="stat-label">duration</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value">{video['size_mb']:.1f} MB</span>
-                                <span class="stat-label">size</span>
+                <div style="max-width: 1400px; margin: 0 auto 3rem auto;">
+                    <h2 style="color: #4a9eff; margin-bottom: 1rem; padding-left: 0.5rem;">Weekly Timelapses ({len(weekly_videos)})</h2>
+                    <p style="color: #888; margin-bottom: 1.5rem; padding-left: 0.5rem;">7-day timelapses at 24fps, ~5 seconds each</p>
+                    <div class="video-grid">
+                '''
+                for video in weekly_videos:
+                    html += f'''
+                    <a href="video?id={video['id']}" class="video-card">
+                        <div class="video-thumbnail">
+                            <div class="play-icon"></div>
+                        </div>
+                        <div class="video-metadata">
+                            <h3>Week of {video['start_date']}</h3>
+                            <p>{video['start_date']} to {video['end_date']}</p>
+                            <div class="video-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{video['frame_count']}</span>
+                                    <span class="stat-label">frames</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value">{video['duration']}s</span>
+                                    <span class="stat-label">duration</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value">{video['size_mb']:.1f} MB</span>
+                                    <span class="stat-label">size</span>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </a>
+                    </a>
+                    '''
+                html += '</div></div>'
+
+            # Daily videos section
+            if daily_videos:
+                html += f'''
+                <div style="max-width: 1400px; margin: 0 auto;">
+                    <h2 style="color: #4a9eff; margin-bottom: 1rem; padding-left: 0.5rem;">Daily Timelapses ({len(daily_videos)})</h2>
+                    <p style="color: #888; margin-bottom: 1.5rem; padding-left: 0.5rem;">24-hour timelapses at 12fps, showing every capture</p>
+                    <div class="video-grid">
                 '''
+                for video in daily_videos:
+                    html += f'''
+                    <a href="video?id={video['id']}" class="video-card">
+                        <div class="video-thumbnail">
+                            <div class="play-icon"></div>
+                        </div>
+                        <div class="video-metadata">
+                            <h3>{video['start_date']}</h3>
+                            <div class="video-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{video['frame_count']}</span>
+                                    <span class="stat-label">frames</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value">{video['duration']}s</span>
+                                    <span class="stat-label">duration</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value">{video['size_mb']:.1f} MB</span>
+                                    <span class="stat-label">size</span>
+                                </div>
+                            </div>
+                        </div>
+                    </a>
+                    '''
+                html += '</div></div>'
             html += '</div>'
         else:
             html += '''
