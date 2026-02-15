@@ -488,13 +488,15 @@ def calculate_time_delta(current_timestamp, previous_timestamp):
 
 
 def format_stats_for_display(stats):
-    """Format brightness and image diff for display with 3 significant figures."""
+    """Format brightness, image diff, and SD for display with 3 significant figures."""
     if not stats:
         return ""
 
     brightness = float(stats.get('avg_brightness', 0))
     # Use image_diff (difference from previous image)
     diff = float(stats.get('image_diff', 0))
+    # Use noise_floor as standard deviation
+    sd = float(stats.get('noise_floor', 0))
 
     # Format to 3 significant figures
     from decimal import Decimal
@@ -507,8 +509,9 @@ def format_stats_for_display(stats):
 
     brightness_str = format_sig_figs(brightness)
     diff_str = format_sig_figs(diff)
+    sd_str = format_sig_figs(sd)
 
-    return f" | B:{brightness_str} Δ:{diff_str}"
+    return f" | B:{brightness_str} Δ:{diff_str} SD:{sd_str}"
 
 
 def get_all_lambda_functions():
