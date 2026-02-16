@@ -1251,7 +1251,16 @@ def render_pi_fleet_page(pis):
             status_class = 'status-online' if online else 'status-offline'
             status_text = 'Online' if online else 'Offline'
 
-            serial = pi.get('serial', 'unknown')
+            # Card ID: Use card_id if set, otherwise last 4 digits of SD CID
+            card_id = pi.get('card_id', 'unknown')
+            if card_id == 'unknown' or not card_id:
+                sd_cid = pi.get('sd_cid', '')
+                if sd_cid and len(sd_cid) >= 4:
+                    card_id = sd_cid[-4:]  # Last 4 hex digits
+                else:
+                    card_id = 'unknown'
+
+            serial = pi.get('serial', 'unknown')  # Keep for backward compatibility
             local_ip = pi.get('local_ip', 'unknown')
             app_name = pi.get('app_name', 'unknown')
             uptime = format_uptime(pi.get('uptime_seconds', 0))
@@ -1301,7 +1310,7 @@ def render_pi_fleet_page(pis):
                 <div class="pi-info">
                     <div class="info-item">
                         <div class="info-label">Card ID</div>
-                        <div class="info-value">{serial}</div>
+                        <div class="info-value">{card_id}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Local IP</div>
