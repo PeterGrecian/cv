@@ -5,6 +5,7 @@ import urllib.request
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 import json
+import math
 
 try:
     import boto3
@@ -25,6 +26,33 @@ DYNAMODB_TABLE = "cv-access-logs"
 MEMSPEED_PREFIX = "memspeed/"
 MEMSPEED_RESULTS_PREFIX = "memspeed/results/"
 MEMSPEED_DOWNLOADS_PREFIX = "memspeed/downloads/"
+
+
+def format_to_sigfigs(value, sigfigs=3):
+    """
+    Format a number to specified significant figures, rounding up.
+
+    Args:
+        value: The number to format
+        sigfigs: Number of significant figures (default: 3)
+
+    Returns:
+        Formatted number as int or float
+    """
+    if value == 0:
+        return 0
+
+    # Calculate the order of magnitude
+    magnitude = math.floor(math.log10(abs(value)))
+
+    # Calculate the scaling factor
+    scale = 10 ** (magnitude - sigfigs + 1)
+
+    # Round up using ceiling
+    rounded = math.ceil(value / scale) * scale
+
+    # Return as int if it's a whole number, otherwise float
+    return int(rounded) if rounded == int(rounded) else rounded
 
 
 def get_parameter(parameter_name):
@@ -1270,18 +1298,28 @@ def render_pi_fleet_page(pis):
             mem = pi.get('memory_percent', 0)
             disk = pi.get('disk_percent', 0)
 
-            # Format memory with total (e.g., "92% of 3.7G")
+            # Format memory with total (e.g., "92% of 3.7G") - 3 sig figs, rounded up
             mem_total_mb = pi.get('memory_total_mb', 0)
             if mem_total_mb > 0:
                 mem_total_gb = mem_total_mb / 1024
-                mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_gb:.1f}G</span>"
+                # Format to 3 significant figures, rounding up
+                mem_total_formatted = format_to_sigfigs(mem_total_gb, 3)
+                # Remove unnecessary decimals for display (e.g., 8.0 -> 8)
+                if isinstance(mem_total_formatted, float) and mem_total_formatted.is_integer():
+                    mem_total_formatted = int(mem_total_formatted)
+                mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_formatted}G</span>"
             else:
                 mem_display = f"{mem}%"
 
-            # Format disk with total (e.g., "45% of 32G")
+            # Format disk with total (e.g., "45% of 32G") - 3 sig figs, rounded up
             disk_total_gb = pi.get('disk_total_gb', 0)
             if disk_total_gb > 0:
-                disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_gb}G</span>"
+                # Format to 3 significant figures, rounding up
+                disk_total_formatted = format_to_sigfigs(disk_total_gb, 3)
+                # Remove unnecessary decimals for display (e.g., 32.0 -> 32)
+                if isinstance(disk_total_formatted, float) and disk_total_formatted.is_integer():
+                    disk_total_formatted = int(disk_total_formatted)
+                disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_formatted}G</span>"
             else:
                 disk_display = f"{disk}%"
 
