@@ -1301,28 +1301,43 @@ def render_pi_fleet_page(pis):
             mem = pi.get('memory_percent', 0)
             disk = pi.get('disk_percent', 0)
 
-            # Format memory with total (e.g., "92% of 3.7G") - 3 sig figs, rounded up
+            # Format memory with total - 3 sig figs, rounded up
+            # Use MB for < 1024 MB, otherwise GB
             mem_total_mb = pi.get('memory_total_mb', 0)
             if mem_total_mb > 0:
-                mem_total_gb = mem_total_mb / 1024
-                # Format to 3 significant figures, rounding up
-                mem_total_formatted = format_to_sigfigs(mem_total_gb, 3)
-                # Remove unnecessary decimals for display (e.g., 8.0 -> 8)
-                if isinstance(mem_total_formatted, float) and mem_total_formatted.is_integer():
-                    mem_total_formatted = int(mem_total_formatted)
-                mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_formatted}G</span>"
+                if mem_total_mb < 1024:
+                    # Display in MB for values < 1GB
+                    mem_total_formatted = format_to_sigfigs(mem_total_mb, 3)
+                    if isinstance(mem_total_formatted, float) and mem_total_formatted.is_integer():
+                        mem_total_formatted = int(mem_total_formatted)
+                    mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_formatted}M</span>"
+                else:
+                    # Display in GB for values >= 1GB
+                    mem_total_gb = mem_total_mb / 1024
+                    mem_total_formatted = format_to_sigfigs(mem_total_gb, 3)
+                    if isinstance(mem_total_formatted, float) and mem_total_formatted.is_integer():
+                        mem_total_formatted = int(mem_total_formatted)
+                    mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_formatted}G</span>"
             else:
                 mem_display = f"{mem}%"
 
-            # Format disk with total (e.g., "45% of 32G") - 3 sig figs, rounded up
+            # Format disk with total - 3 sig figs, rounded up
+            # Use MB for < 1 GB, otherwise GB
             disk_total_gb = pi.get('disk_total_gb', 0)
             if disk_total_gb > 0:
-                # Format to 3 significant figures, rounding up
-                disk_total_formatted = format_to_sigfigs(disk_total_gb, 3)
-                # Remove unnecessary decimals for display (e.g., 32.0 -> 32)
-                if isinstance(disk_total_formatted, float) and disk_total_formatted.is_integer():
-                    disk_total_formatted = int(disk_total_formatted)
-                disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_formatted}G</span>"
+                if disk_total_gb < 1:
+                    # Display in MB for values < 1GB
+                    disk_total_mb = disk_total_gb * 1024
+                    disk_total_formatted = format_to_sigfigs(disk_total_mb, 3)
+                    if isinstance(disk_total_formatted, float) and disk_total_formatted.is_integer():
+                        disk_total_formatted = int(disk_total_formatted)
+                    disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_formatted}M</span>"
+                else:
+                    # Display in GB for values >= 1GB
+                    disk_total_formatted = format_to_sigfigs(disk_total_gb, 3)
+                    if isinstance(disk_total_formatted, float) and disk_total_formatted.is_integer():
+                        disk_total_formatted = int(disk_total_formatted)
+                    disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_formatted}G</span>"
             else:
                 disk_display = f"{disk}%"
 
