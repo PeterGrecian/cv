@@ -33,12 +33,15 @@ def format_to_sigfigs(value, sigfigs=3):
     Format a number to specified significant figures, rounding up.
 
     Args:
-        value: The number to format
+        value: The number to format (can be int, float, or Decimal)
         sigfigs: Number of significant figures (default: 3)
 
     Returns:
         Formatted number as int or float
     """
+    # Convert to float (handles Decimal from DynamoDB)
+    value = float(value)
+
     if value == 0:
         return 0
 
