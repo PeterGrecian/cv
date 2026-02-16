@@ -54,6 +54,11 @@ def format_to_sigfigs(value, sigfigs=3):
     # Round up using ceiling
     rounded = math.ceil(value / scale) * scale
 
+    # Round to eliminate floating point precision errors
+    # Use enough decimal places to preserve significant figures
+    decimal_places = max(0, sigfigs - magnitude - 1)
+    rounded = round(rounded, decimal_places)
+
     # Return as int if it's a whole number, otherwise float
     return int(rounded) if rounded == int(rounded) else rounded
 
