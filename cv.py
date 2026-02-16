@@ -990,6 +990,7 @@ def render_pi_fleet_page(pis):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pi Fleet Status</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPCEtLSBCbHVlIFBldGVyIG5hdXRpY2FsIGZsYWcgLS0+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBmaWxsPSIjMDAzODkzIiByeD0iMyIvPgogIDxyZWN0IHg9IjkiIHk9IjkiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgZmlsbD0iI0ZGRkZGRiIvPgo8L3N2Zz4K">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -1309,6 +1310,10 @@ def render_pi_fleet_page(pis):
 
                 <div class="pi-info">
                     <div class="info-item">
+                        <div class="info-label">Model</div>
+                        <div class="info-value" style="font-size: 0.75em;">{pi.get('cpu_model', 'Unknown')}</div>
+                    </div>
+                    <div class="info-item">
                         <div class="info-label">Card ID</div>
                         <div class="info-value">{card_id}</div>
                     </div>
@@ -1323,6 +1328,10 @@ def render_pi_fleet_page(pis):
                     <div class="info-item">
                         <div class="info-label">Uptime</div>
                         <div class="info-value">{uptime}</div>
+                    </div>
+                    <div class="info-item" style="grid-column: 1 / -1;">
+                        <div class="info-label">OS</div>
+                        <div class="info-value" style="font-size: 0.75em;">{pi.get('os_version', 'Unknown')}</div>
                     </div>
             '''
 
