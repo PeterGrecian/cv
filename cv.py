@@ -1061,14 +1061,14 @@ def render_pi_fleet_page(pis):
 
         .pi-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-            gap: 1.5rem;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
         }
 
         .pi-card {
             background: rgba(255, 255, 255, 0.95);
-            border-radius: 12px;
-            padding: 1.5rem;
+            border-radius: 8px;
+            padding: 1rem;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
             transition: transform 0.2s;
         }
@@ -1082,22 +1082,22 @@ def render_pi_fleet_page(pis):
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1rem;
-            padding-bottom: 1rem;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
             border-bottom: 2px solid #e5e7eb;
         }
 
         .pi-hostname {
-            font-size: 1.3rem;
+            font-size: 1.1rem;
             font-weight: bold;
             color: #333;
         }
 
         .pi-status {
-            font-size: 0.9rem;
+            font-size: 0.8rem;
             font-weight: 600;
-            padding: 0.25rem 0.75rem;
-            border-radius: 12px;
+            padding: 0.2rem 0.6rem;
+            border-radius: 10px;
         }
 
         .status-online {
@@ -1113,17 +1113,18 @@ def render_pi_fleet_page(pis):
         .pi-info {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 0.75rem;
-            margin-bottom: 1rem;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
         }
 
         .info-item {
-            font-size: 0.9rem;
+            font-size: 0.8rem;
         }
 
         .info-label {
             color: #666;
             font-weight: 500;
+            font-size: 0.75rem;
         }
 
         .info-value {
@@ -1133,9 +1134,9 @@ def render_pi_fleet_page(pis):
 
         .metrics {
             display: flex;
-            gap: 1rem;
-            margin-top: 1rem;
-            padding-top: 1rem;
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
             border-top: 1px solid #e5e7eb;
         }
 
@@ -1145,13 +1146,13 @@ def render_pi_fleet_page(pis):
         }
 
         .metric-value {
-            font-size: 1.5rem;
+            font-size: 1.2rem;
             font-weight: bold;
             color: #667eea;
         }
 
         .metric-label {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: #666;
             text-transform: uppercase;
         }
@@ -1259,6 +1260,21 @@ def render_pi_fleet_page(pis):
             mem = pi.get('memory_percent', 0)
             disk = pi.get('disk_percent', 0)
 
+            # Format memory with total (e.g., "92% of 3.7G")
+            mem_total_mb = pi.get('memory_total_mb', 0)
+            if mem_total_mb > 0:
+                mem_total_gb = mem_total_mb / 1024
+                mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_gb:.1f}G</span>"
+            else:
+                mem_display = f"{mem}%"
+
+            # Format disk with total (e.g., "45% of 32G")
+            disk_total_gb = pi.get('disk_total_gb', 0)
+            if disk_total_gb > 0:
+                disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_gb}G</span>"
+            else:
+                disk_display = f"{disk}%"
+
             tunnel_active = pi.get('tunnel_active', False)
             tunnel_port = pi.get('tunnel_port', 0)
             bastion_host = pi.get('bastion_host', 'unknown')
@@ -1284,7 +1300,7 @@ def render_pi_fleet_page(pis):
 
                 <div class="pi-info">
                     <div class="info-item">
-                        <div class="info-label">Serial</div>
+                        <div class="info-label">Card ID</div>
                         <div class="info-value">{serial}</div>
                     </div>
                     <div class="info-item">
@@ -1329,11 +1345,11 @@ def render_pi_fleet_page(pis):
                         <div class="metric-label">CPU</div>
                     </div>
                     <div class="metric">
-                        <div class="metric-value">{mem}%</div>
+                        <div class="metric-value">{mem_display}</div>
                         <div class="metric-label">Memory</div>
                     </div>
                     <div class="metric">
-                        <div class="metric-value">{disk}%</div>
+                        <div class="metric-value">{disk_display}</div>
                         <div class="metric-label">Disk</div>
                     </div>
                 </div>
@@ -1366,13 +1382,29 @@ def render_pi_fleet_page(pis):
 
     html += '''
         <div class="auto-refresh">
-            Page auto-refreshes every 30 seconds
+            Page auto-refreshes every 30 seconds • <span id="countdown">refreshing in 30 seconds</span>
         </div>
     </div>
 
     <script>
-        // Auto-refresh every 30 seconds
-        setTimeout(() => location.reload(), 30000);
+        // Auto-refresh with countdown
+        let secondsLeft = 30;
+        const countdownEl = document.getElementById('countdown');
+
+        function updateCountdown() {
+            countdownEl.textContent = `refreshing in ${secondsLeft} second${secondsLeft !== 1 ? 's' : ''}`;
+            secondsLeft--;
+
+            if (secondsLeft < 0) {
+                location.reload();
+            }
+        }
+
+        // Update immediately
+        updateCountdown();
+
+        // Update every second
+        setInterval(updateCountdown, 1000);
     </script>
     </body>
     </html>
