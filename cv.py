@@ -1028,218 +1028,184 @@ def render_pi_fleet_page(pis):
     <title>Pi Fleet Status</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CiAgPCEtLSBCbHVlIFBldGVyIG5hdXRpY2FsIGZsYWcgLS0+CiAgPHJlY3Qgd2lkdGg9IjMyIiBoZWlnaHQ9IjMyIiBmaWxsPSIjMDAzODkzIiByeD0iMyIvPgogIDxyZWN0IHg9IjkiIHk9IjkiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgZmlsbD0iI0ZGRkZGRiIvPgo8L3N2Zz4K">
     <style>
+        * { box-sizing: border-box; }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, 'SF Pro Display', 'Inter', 'Roboto', sans-serif;
+            background: #000000;
+            color: #E0E0E0;
             min-height: 100vh;
             margin: 0;
-            padding: 2rem;
+            padding: 0.75rem;
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
         }
 
         h1 {
-            color: white;
+            color: #E0E0E0;
             text-align: center;
-            margin-bottom: 2rem;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
 
         .home-link {
             text-align: center;
-            margin-bottom: 1rem;
+            margin-bottom: 0.4rem;
         }
 
         .home-link a {
-            color: white;
+            color: #007AFF;
             text-decoration: none;
-            font-size: 1rem;
-            opacity: 0.9;
+            font-size: 0.85rem;
         }
 
-        .home-link a:hover {
-            opacity: 1;
-            text-decoration: underline;
-        }
+        .home-link a:hover { opacity: 0.8; }
 
         .summary {
-            background: rgba(255, 255, 255, 0.95);
+            background: #161616;
             border-radius: 12px;
-            padding: 1.5rem;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            padding: 0.5rem 1rem;
+            margin-bottom: 0.75rem;
             display: flex;
             justify-content: space-around;
             flex-wrap: wrap;
-            gap: 1rem;
+            gap: 0.5rem;
         }
 
-        .summary-item {
-            text-align: center;
-        }
+        .summary-item { text-align: center; }
 
         .summary-value {
-            font-size: 2rem;
-            font-weight: bold;
-            margin-bottom: 0.25rem;
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 0;
         }
 
         .summary-label {
-            color: #666;
-            font-size: 0.9rem;
+            color: #8E8E93;
+            font-size: 0.75rem;
         }
 
-        .online { color: #10b981; }
-        .offline { color: #ef4444; }
-        .total { color: #667eea; }
+        .online  { color: #007AFF; }
+        .offline { color: #FF3B30; }
+        .total   { color: #E0E0E0; }
 
         .pi-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 0.6rem;
         }
 
         .pi-card {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 8px;
-            padding: 1rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            transition: transform 0.2s;
+            background: #161616;
+            border-radius: 12px;
+            padding: 0.65rem 0.75rem;
+            transition: opacity 0.2s;
         }
 
-        .pi-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 8px 12px rgba(0,0,0,0.3);
-        }
+        .pi-card:hover { opacity: 0.85; }
 
         .pi-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 0.75rem;
-            padding-bottom: 0.75rem;
-            border-bottom: 2px solid #e5e7eb;
+            margin-bottom: 0.4rem;
+            padding-bottom: 0.4rem;
+            border-bottom: 1px solid #2C2C2E;
         }
 
         .pi-hostname {
-            font-size: 1.1rem;
-            font-weight: bold;
-            color: #333;
+            font-size: 1.05rem;
+            font-weight: 500;
+            color: #E0E0E0;
         }
 
         .pi-status {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             font-weight: 600;
-            padding: 0.2rem 0.6rem;
-            border-radius: 10px;
+            padding: 0.15rem 0.55rem;
+            border-radius: 20px;
         }
 
-        .status-online {
-            background: #d1fae5;
-            color: #065f46;
-        }
-
-        .status-offline {
-            background: #fee2e2;
-            color: #991b1b;
-        }
+        .status-online  { background: #0A2540; color: #007AFF; }
+        .status-offline { background: #2C1010; color: #FF3B30; }
 
         .pi-info {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0.5rem;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.4rem;
+            font-size: 0.78rem;
         }
 
-        .info-item {
-            font-size: 0.8rem;
+        .info-item { margin-bottom: 0.1rem; }
+
+        .info-row {
+            display: table;
+            width: 100%;
+            margin-bottom: 0.1rem;
         }
 
-        .info-label {
-            color: #666;
-            font-weight: 500;
-            font-size: 0.75rem;
+        .info-row .info-item {
+            display: table-cell;
+            width: 50%;
+            margin-bottom: 0;
         }
 
-        .info-value {
-            color: #333;
-            font-weight: 600;
+        .info-label { color: #8E8E93; }
+
+        .info-value { color: #E0E0E0; }
+
+        .metrics-line {
+            font-size: 0.78rem;
+            padding-top: 0.4rem;
+            border-top: 1px solid #2C2C2E;
+            color: #8E8E93;
         }
 
-        .metrics {
-            display: flex;
-            gap: 0.75rem;
-            margin-top: 0.75rem;
-            padding-top: 0.75rem;
-            border-top: 1px solid #e5e7eb;
-        }
-
-        .metric {
-            flex: 1;
-            text-align: center;
-        }
-
-        .metric-value {
-            font-size: 1.2rem;
-            font-weight: bold;
-            color: #667eea;
-        }
-
-        .metric-label {
-            font-size: 0.7rem;
-            color: #666;
-            text-transform: uppercase;
-        }
+        .metrics-line .info-value { color: #007AFF; }
 
         .boot-progress {
-            margin-top: 1rem;
-            padding: 0.75rem;
-            background: #fef3c7;
-            border-left: 4px solid #f59e0b;
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.6rem;
+            background: #1C1A0A;
+            border-left: 3px solid #FF9500;
             border-radius: 4px;
-            font-size: 0.85rem;
+            font-size: 0.78rem;
+            color: #FF9500;
         }
 
         .error-box {
-            margin-top: 1rem;
-            padding: 0.75rem;
-            background: #fee2e2;
-            border-left: 4px solid #ef4444;
+            margin-top: 0.5rem;
+            padding: 0.5rem 0.6rem;
+            background: #2C1010;
+            border-left: 3px solid #FF3B30;
             border-radius: 4px;
-            font-size: 0.85rem;
-            color: #991b1b;
+            font-size: 0.78rem;
+            color: #FF3B30;
         }
 
         .empty-state {
-            background: rgba(255, 255, 255, 0.95);
+            background: #161616;
             border-radius: 12px;
             padding: 3rem;
             text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         }
 
-        .empty-state h2 {
-            color: #666;
-            margin-bottom: 1rem;
-        }
+        .empty-state h2 { color: #8E8E93; margin-bottom: 1rem; }
 
         .auto-refresh {
             text-align: center;
-            color: white;
-            margin-top: 2rem;
-            font-size: 0.9rem;
-            opacity: 0.8;
+            color: #8E8E93;
+            margin-top: 0.75rem;
+            font-size: 0.75rem;
         }
+
+        #countdown { color: #007AFF; }
 
         @media (max-width: 768px) {
             .pi-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .pi-info {
                 grid-template-columns: 1fr;
             }
         }
@@ -1315,14 +1281,14 @@ def render_pi_fleet_page(pis):
                     mem_total_formatted = format_to_sigfigs(mem_total_mb, 3)
                     if isinstance(mem_total_formatted, float) and mem_total_formatted.is_integer():
                         mem_total_formatted = int(mem_total_formatted)
-                    mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_formatted}M</span>"
+                    mem_display = f"{mem}% of {mem_total_formatted}M"
                 else:
                     # Display in GB for values >= 1GB
                     mem_total_gb = mem_total_mb / 1024
                     mem_total_formatted = format_to_sigfigs(mem_total_gb, 3)
                     if isinstance(mem_total_formatted, float) and mem_total_formatted.is_integer():
                         mem_total_formatted = int(mem_total_formatted)
-                    mem_display = f"{mem}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {mem_total_formatted}G</span>"
+                    mem_display = f"{mem}% of {mem_total_formatted}G"
             else:
                 mem_display = f"{mem}%"
 
@@ -1336,13 +1302,13 @@ def render_pi_fleet_page(pis):
                     disk_total_formatted = format_to_sigfigs(disk_total_mb, 3)
                     if isinstance(disk_total_formatted, float) and disk_total_formatted.is_integer():
                         disk_total_formatted = int(disk_total_formatted)
-                    disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_formatted}M</span>"
+                    disk_display = f"{disk}% of {disk_total_formatted}M"
                 else:
                     # Display in GB for values >= 1GB
                     disk_total_formatted = format_to_sigfigs(disk_total_gb, 3)
                     if isinstance(disk_total_formatted, float) and disk_total_formatted.is_integer():
                         disk_total_formatted = int(disk_total_formatted)
-                    disk_display = f"{disk}%<br><span style='font-size: 0.7em; opacity: 0.8;'>of {disk_total_formatted}G</span>"
+                    disk_display = f"{disk}% of {disk_total_formatted}G"
             else:
                 disk_display = f"{disk}%"
 
@@ -1370,67 +1336,35 @@ def render_pi_fleet_page(pis):
                 </div>
 
                 <div class="pi-info">
-                    <div class="info-item">
-                        <div class="info-label">Model</div>
-                        <div class="info-value" style="font-size: 0.75em;">{pi.get('cpu_model', 'Unknown')}</div>
+                    <div class="info-item"><span class="info-label">Model:</span> <span class="info-value" style="font-size: 0.75em;">{pi.get('cpu_model', 'Unknown')}</span></div>
+                    <div class="info-row">
+                        <div class="info-item"><span class="info-label">Card ID:</span> <span class="info-value">{card_id}</span></div>
+                        <div class="info-item"><span class="info-label">IP:</span> <span class="info-value">{local_ip}</span></div>
                     </div>
-                    <div class="info-item">
-                        <div class="info-label">Card ID</div>
-                        <div class="info-value">{card_id}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Local IP</div>
-                        <div class="info-value">{local_ip}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">App</div>
-                        <div class="info-value">{app_name}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Uptime</div>
-                        <div class="info-value">{uptime}</div>
-                    </div>
-                    <div class="info-item" style="grid-column: 1 / -1;">
-                        <div class="info-label">OS</div>
-                        <div class="info-value" style="font-size: 0.75em;">{pi.get('os_version', 'Unknown')}</div>
-                    </div>
+                    <div class="info-item"><span class="info-label">App:</span> <span class="info-value">{app_name}</span></div>
+                    <div class="info-item"><span class="info-label">Uptime:</span> <span class="info-value">{uptime}</span></div>
+                    <div class="info-item"><span class="info-label">OS:</span> <span class="info-value" style="font-size: 0.75em;">{pi.get('os_version', 'Unknown')}</span></div>
             '''
 
             if tunnel_active:
                 html += f'''
-                    <div class="info-item">
-                        <div class="info-label">SSH Tunnel</div>
-                        <div class="info-value">Port {tunnel_port}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Bastion</div>
-                        <div class="info-value">{bastion_host}</div>
-                    </div>
+                    <div class="info-item"><span class="info-label">SSH Tunnel:</span> <span class="info-value">Port {tunnel_port}</span></div>
+                    <div class="info-item"><span class="info-label">Bastion:</span> <span class="info-value">{bastion_host}</span></div>
                 '''
 
             html += f'''
-                    <div class="info-item" style="grid-column: 1 / -1;">
-                        <div class="info-label">Last Seen</div>
-                        <div class="info-value">{last_seen_str}</div>
-                    </div>
+                    <div class="info-item"><span class="info-label">Last Seen:</span> <span class="info-value">{last_seen_str}</span></div>
                 </div>
             '''
 
             if online:
                 html += f'''
-                <div class="metrics">
-                    <div class="metric">
-                        <div class="metric-value">{cpu}%</div>
-                        <div class="metric-label">CPU</div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-value">{mem_display}</div>
-                        <div class="metric-label">Memory</div>
-                    </div>
-                    <div class="metric">
-                        <div class="metric-value">{disk_display}</div>
-                        <div class="metric-label">Disk</div>
-                    </div>
+                <div class="metrics-line">
+                    <span class="info-label">CPU</span> <span class="info-value">{cpu}%</span>
+                    &nbsp;·&nbsp;
+                    <span class="info-label">Mem</span> <span class="info-value">{mem_display}</span>
+                    &nbsp;·&nbsp;
+                    <span class="info-label">Disk</span> <span class="info-value">{disk_display}</span>
                 </div>
                 '''
 
