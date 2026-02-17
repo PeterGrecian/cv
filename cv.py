@@ -2526,19 +2526,25 @@ def lambda_handler(event, context):
 
             html += f'''
             <title>Full Resolution - {timestamp}</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
             <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
-                .nav {{ margin-bottom: 1rem; }}
-                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                html, body {{ width: 100%; height: 100%; overflow-x: hidden; }}
+                body {{ font-family: Arial, sans-serif; text-align: center; background: #1a1a1a; color: #fff; display: flex; flex-direction: column; }}
+                .nav {{ padding: 1rem; flex-shrink: 0; }}
+                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 0.5rem; }}
                 .nav a:hover {{ text-decoration: underline; }}
-                h2 {{ margin-bottom: 1rem; color: #aaa; }}
-                img {{ max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
+                h2 {{ padding: 0 1rem; margin-bottom: 1rem; color: #aaa; font-size: 1rem; flex-shrink: 0; }}
+                .image-wrapper {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 1rem; }}
+                img {{ max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); }}
             </style>
             <div class="nav">
                 <a href="/contents">Home</a> | <a href="/gardencam">Latest</a> | <a href="/gardencam/gallery">Gallery</a>
             </div>
             <h2>{timestamp} UTC{stats_display}</h2>
-            <img src="{image_url}" alt="Full resolution image">
+            <div class="image-wrapper">
+                <img src="{image_url}" alt="Full resolution image">
+            </div>
             '''
         else:
             html += '<h1>Error: No image specified</h1>'
@@ -2617,20 +2623,23 @@ def lambda_handler(event, context):
 
             html += f'''
             <title>Handnail - {timestamp}</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
             <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
-                .nav {{ margin-bottom: 1rem; }}
-                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; }}
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                html, body {{ width: 100%; height: 100%; overflow-x: hidden; }}
+                body {{ font-family: Arial, sans-serif; text-align: center; background: #1a1a1a; color: #fff; display: flex; flex-direction: column; }}
+                .nav {{ padding: 1rem; flex-shrink: 0; }}
+                .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 0.5rem; }}
                 .nav a:hover {{ text-decoration: underline; }}
-                h2 {{ margin-bottom: 1rem; color: #aaa; }}
-                .image-container {{ max-width: 800px; margin: 0 auto; }}
-                img {{ width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); cursor: pointer; }}
+                h2 {{ padding: 0 1rem; margin-bottom: 1rem; color: #aaa; font-size: 1rem; flex-shrink: 0; }}
+                .image-wrapper {{ flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 1rem; max-width: 800px; margin: 0 auto; width: 100%; }}
+                img {{ max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.5); cursor: pointer; }}
             </style>
             <div class="nav">
                 <a href="/contents">Home</a> | <a href="/gardencam">Latest</a> | <a href="/gardencam/gallery">Gallery</a> | <a href="/gardencam/fullres?key={image_key}">Full Res</a>
             </div>
             <h2>{timestamp} UTC{stats_display}</h2>
-            <div class="image-container">
+            <div class="image-wrapper">
                 <a href="/gardencam/fullres?key={image_key}">
                     <img src="{image_url}" alt="Handnail preview">
                 </a>
@@ -2654,6 +2663,7 @@ def lambda_handler(event, context):
         query_params = event.get('queryStringParameters', {}) or {}
         week_param = query_params.get('week', '')
         day_param = query_params.get('day', '')
+        chunk_param = query_params.get('chunk', '0')  # 0-3 for 6-hour chunks
 
         # Three-level navigation: Weeks → Days → Images
         # OPTIMIZED: Only load S3 data when needed
@@ -2769,14 +2779,40 @@ def lambda_handler(event, context):
                     next_day = days[day_index + 1][0]
                     next_link = f'<a href="/gardencam/gallery?week={week_param}&day={next_day}">Next Day →</a>'
 
+                # Filter images by 6-hour chunks (0-3: 0-6h, 6-12h, 12-18h, 18-24h)
+                try:
+                    chunk_idx = int(chunk_param)
+                except (ValueError, TypeError):
+                    chunk_idx = 0
+
+                chunk_idx = max(0, min(3, chunk_idx))  # Clamp to 0-3
+                chunk_start_hour = chunk_idx * 6
+                chunk_end_hour = (chunk_idx + 1) * 6
+
+                chunked_images = []
+                for img in current_day_images:
+                    try:
+                        time_str = img['timestamp'].split()[1] if ' ' in img['timestamp'] else "00:00:00"
+                        hour = int(time_str.split(':')[0])
+                        if chunk_start_hour <= hour < chunk_end_hour:
+                            chunked_images.append(img)
+                    except (ValueError, IndexError):
+                        pass
+
+                chunk_names = ["00:00-06:00", "06:00-12:00", "12:00-18:00", "18:00-24:00"]
+                chunk_label = chunk_names[chunk_idx]
+
                 html += f'''
-                <title>{day_param} - Gallery</title>
+                <title>{day_param} - {chunk_label} - Gallery</title>
                 <style>
                     body {{ font-family: Arial, sans-serif; margin: 0; padding: 1rem; background: #1a1a1a; color: #fff; }}
                     .nav {{ text-align: center; margin-bottom: 1.5rem; }}
-                    .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 1rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; }}
+                    .nav a {{ color: #4a9eff; text-decoration: none; margin: 0 0.5rem; padding: 0.5rem 1rem; background: #2a2a2a; border-radius: 6px; display: inline-block; font-size: 0.9rem; }}
                     .nav a:hover {{ background: #3a3a3a; }}
-                    h1 {{ text-align: center; margin-bottom: 2rem; }}
+                    .chunk-nav {{ text-align: center; margin-bottom: 1rem; }}
+                    .chunk-nav a {{ margin: 0 0.3rem; padding: 0.3rem 0.8rem; font-size: 0.85rem; }}
+                    h1 {{ text-align: center; margin-bottom: 0.5rem; }}
+                    .chunk-label {{ text-align: center; color: #888; margin-bottom: 1.5rem; font-size: 0.9rem; }}
                     .thumbnails {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; max-width: 1400px; margin: 0 auto; }}
                     .thumb-container {{ position: relative; }}
                     .thumb-container a {{ display: block; }}
@@ -2787,6 +2823,7 @@ def lambda_handler(event, context):
                     @media (max-width: 768px) {{
                         .thumbnails {{ grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }}
                         .thumb-container img {{ height: 120px; }}
+                        .nav a {{ font-size: 0.8rem; padding: 0.4rem 0.8rem; }}
                     }}
                 </style>
                     <div class="nav">
@@ -2798,6 +2835,19 @@ def lambda_handler(event, context):
                         {next_link}
                     </div>
                     <h1>{day_param}</h1>
+                    <div class="chunk-label">Time Block: {chunk_label}</div>
+                    <div class="chunk-nav">
+                '''
+
+                # Add chunk navigation links
+                for c in range(4):
+                    chunk_names_short = ["00-06", "06-12", "12-18", "18-24"]
+                    chunk_url = f"/gardencam/gallery?week={week_param}&day={day_param}&chunk={c}"
+                    active = " style='background: #4a5568; color: #fff;'" if c == chunk_idx else ""
+                    html += f'<a href="{chunk_url}"{active}>{chunk_names_short[c]}</a>'
+
+                html += '''
+                    </div>
                 '''
 
                 html += '<div class="thumbnails">'
@@ -2805,7 +2855,7 @@ def lambda_handler(event, context):
                 displayed_count = 0
                 displayed_images = []  # Track displayed images for delta calculation
 
-                for img in current_day_images:
+                for img in chunked_images:
                     # Use 150px gallery thumbnail (small, fast)
                     thumb_150_key = f"thumb_150px_{img['key']}"
                     gallery_thumb_url = get_presigned_url(thumb_150_key)
