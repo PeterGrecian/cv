@@ -2871,12 +2871,16 @@ def lambda_handler(event, context):
                         if time_delta:
                             time_delta = f"{time_delta} "  # Add space after delta
 
+                    # Get stats for this image
+                    stats = get_image_stats_by_filename(img['key'])
+                    stats_display = format_stats_for_display(stats)
+
                     html += f'''
                     <div class="thumb-container">
                         <a href="/gardencam/handnail?key={img['key']}">
                             <img src="{gallery_thumb_url}" alt="{img['timestamp']}">
                         </a>
-                        <div class="thumb-time">{time_delta}{time_only}</div>
+                        <div class="thumb-time">{time_delta}{time_only}{stats_display}</div>
                     </div>
                     '''
                     displayed_count += 1
