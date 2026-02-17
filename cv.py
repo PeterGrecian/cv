@@ -3886,7 +3886,7 @@ def lambda_handler(event, context):
                 html += f'''
                 <div class="image-container">
                     <div class="label">{label}</div>
-                    <a href="/gardencam/display?key={img['key']}">
+                    <a href="/gardencam/handnail?key={img['key']}">
                         <img src="{img['url']}" alt="{label} capture">
                     </a>
                     <p class="timestamp">{time_delta}{img['timestamp']}{resolution_display}{stats_display}</p>
