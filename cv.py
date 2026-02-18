@@ -1335,6 +1335,8 @@ def render_pi_fleet_page(pis):
                     card_id = 'unknown'
 
             serial = pi.get('serial', 'unknown')  # Keep for backward compatibility
+            hw_serial = pi.get('hardware_serial', '')
+            hw_serial_display = f'\u2026{hw_serial[-8:]}' if len(hw_serial) >= 8 else (hw_serial or '\u2014')
             local_ip = pi.get('local_ip', 'unknown')
             app_name = pi.get('app_name', 'unknown')
             uptime = format_uptime(pi.get('uptime_seconds', 0))
@@ -1407,14 +1409,15 @@ def render_pi_fleet_page(pis):
                 </div>
 
                 <div class="pi-info">
-                    <div class="info-item"><span class="info-label">Model:</span> <span class="info-value" style="font-size: 0.75em;">{pi.get('cpu_model', 'Unknown')}</span></div>
+                    <div class="info-item"><span class="info-label">Model:</span> <span class="info-value">{pi.get('cpu_model', 'Unknown')}</span></div>
                     <div class="info-row">
                         <div class="info-item"><span class="info-label">Card ID:</span> <span class="info-value">{card_id}</span></div>
-                        <div class="info-item"><span class="info-label">IP:</span> <span class="info-value">{local_ip}</span></div>
+                        <div class="info-item"><span class="info-label">HW:</span> <span class="info-value" title="{hw_serial}">{hw_serial_display}</span></div>
                     </div>
+                    <div class="info-item"><span class="info-label">IP:</span> <span class="info-value">{local_ip}</span></div>
                     <div class="info-item"><span class="info-label">App:</span> <span class="info-value">{app_name}</span></div>
                     <div class="info-item"><span class="info-label">Uptime:</span> <span class="info-value">{uptime}</span></div>
-                    <div class="info-item"><span class="info-label">OS:</span> <span class="info-value" style="font-size: 0.75em;">{pi.get('os_version', 'Unknown')}</span></div>
+                    <div class="info-item"><span class="info-label">OS:</span> <span class="info-value">{pi.get('os_version', 'Unknown')}</span></div>
             '''
 
             if tunnel_active:
