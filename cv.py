@@ -1063,6 +1063,42 @@ def format_uptime(seconds):
     return " ".join(parts)
 
 
+def format_last_seen_relative(last_seen):
+    """Format last_seen timestamp as relative time (e.g., '5 minutes ago')."""
+    if not last_seen:
+        return 'Never'
+
+    try:
+        from dateutil import parser
+        last_seen_dt = parser.parse(last_seen)
+    except:
+        try:
+            last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
+        except:
+            return last_seen
+
+    now = datetime.now(timezone.utc)
+    delta = (now - last_seen_dt).total_seconds()
+
+    if delta < 60:
+        return 'just now'
+    elif delta < 120:
+        return '1 minute ago'
+    elif delta < 3600:
+        minutes = int(delta / 60)
+        return f'{minutes} minutes ago'
+    elif delta < 7200:
+        return '1 hour ago'
+    elif delta < 86400:
+        hours = int(delta / 3600)
+        return f'{hours} hours ago'
+    elif delta < 172800:
+        return '1 day ago'
+    else:
+        days = int(delta / 86400)
+        return f'{days} days ago'
+
+
 def is_pi_online(last_seen):
     """Check if Pi is online based on last_seen timestamp."""
     if not last_seen:
@@ -1390,16 +1426,7 @@ def render_pi_fleet_page(pis):
             bastion_host = pi.get('bastion_host', 'unknown')
 
             last_seen = pi.get('last_seen', 'Never')
-            try:
-                from dateutil import parser
-                last_seen_dt = parser.parse(last_seen)
-                last_seen_str = last_seen_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-            except:
-                try:
-                    last_seen_dt = datetime.fromisoformat(last_seen.replace('Z', '+00:00'))
-                    last_seen_str = last_seen_dt.strftime('%Y-%m-%d %H:%M:%S UTC')
-                except:
-                    last_seen_str = last_seen
+            last_seen_str = format_last_seen_relative(last_seen)
 
             html += f'''
             <div class="pi-card">
