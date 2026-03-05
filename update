@@ -46,7 +46,8 @@ echo '</body></html>' >> gitinfo.html
 zip cv.zip *.py *.html *.png64 contents.html petergrecian.jpg gitinfo.html
 
 # update lambda function
-fn=cvdev
+fn=mywebsite
+#fn=cvdev
 #fn=cv-experimental
 aws lambda update-function-code --zip-file fileb://$PWD/cv.zip \
   --function-name $fn | grep CodeSize
