@@ -27,6 +27,7 @@ This is an AWS Lambda function served via API Gateway that hosts multiple web ap
 | `/gardencam/capture` | POST endpoint to trigger remote capture |
 | `/gardencam/fullres` | Full resolution image view |
 | `/gardencam/display` | Display-width image view |
+| `/pi-fleet` | Raspberry Pi fleet monitoring dashboard |
 | `/t3` | K2 bus arrivals from TfL API (Parklands stop) |
 | `/lambda-stats` | Lambda execution costs and metrics |
 | `/event` | Debug info (request details) |
@@ -41,6 +42,7 @@ This is an AWS Lambda function served via API Gateway that hosts multiple web ap
 | DynamoDB: `gardencam-stats` | Image capture statistics |
 | DynamoDB: `gardencam-commands` | Remote capture commands |
 | DynamoDB: `lambda-execution-logs` | Execution metrics and costs |
+| DynamoDB: `pi-fleet-status` | Pi fleet monitoring (status, metrics, hardware info) |
 | Secrets Manager: `gardencam/password` | Basic auth password for gardencam |
 | Secrets Manager: `tfl/api-key` | TfL API key for bus times |
 
@@ -62,7 +64,10 @@ Gardencam endpoints use HTTP Basic Auth. Password is stored in AWS Secrets Manag
 ## Related Projects
 
 - **Gardencam Pi** (`~/Berrylands/gardencam/`): Raspberry Pi that captures images and uploads to S3
-- The Pi polls `gardencam-commands` DynamoDB table for remote capture requests
+  - The Pi polls `gardencam-commands` DynamoDB table for remote capture requests
+- **Pi-Fleet** (`~/Berrylands/pi-fleet/`): Fleet monitoring system with SSH reverse tunnel access
+  - Pis report status (CPU, memory, disk, IP) to `pi-fleet-status` DynamoDB table every minute
+  - Dashboard reads from DynamoDB and displays real-time fleet status with relative timestamps
 
 ## AWS Region
 
