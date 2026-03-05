@@ -47,10 +47,13 @@ zip cv.zip *.py *.html *.png64 contents.html petergrecian.jpg gitinfo.html
 
 # update lambda function
 fn=mywebsite
+handler=cv.lambda_handler
 #fn=cvdev
 #fn=cv-experimental
 aws lambda update-function-code --zip-file fileb://$PWD/cv.zip \
   --function-name $fn | grep CodeSize
+aws lambda update-function-configuration --function-name $fn \
+  --handler $handler 2>&1 | grep -E "Handler|FunctionArn" | head -1
 echo aws logs tail /aws/lambda/$fn --follow
 
 # cleanup
